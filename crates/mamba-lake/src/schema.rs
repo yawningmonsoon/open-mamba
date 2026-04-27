@@ -125,4 +125,48 @@ CREATE TABLE IF NOT EXISTS solver_skip_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_skip_rules_active   ON solver_skip_rules(active);
 CREATE INDEX IF NOT EXISTS idx_skip_rules_protocol ON solver_skip_rules(protocol);
+
+-- ── Webhook triggers ──────────────────────────────────────────────────────────
+-- A registered hook URL (`POST /webhooks/:hook_id`) maps to a task template.
+-- When the endpoint is hit, the request body is merged into `payload_template`
+-- (treated as a literal string with no substitution today; future versions can
+-- add Liquid/Handlebars). The result becomes a new task envelope.
+--
+-- Hook IDs are short URL-safe strings the user picks. They're public — the
+-- secret comes from the Bearer key on the trigger endpoint, gated by the
+-- existing MAMBA_API_KEY middleware.
+CREATE TABLE IF NOT EXISTS webhooks (
+    hook_id          VARCHAR     PRIMARY KEY,
+    project          VARCHAR     NOT NULL,
+    assigned_agent   VARCHAR     NOT NULL,
+    skill            VARCHAR,
+    model            VARCHAR     NOT NULL,
+    payload_template TEXT        NOT NULL,
+    priority         TINYINT     NOT NULL DEFAULT 5,
+    enabled          BOOLEAN     NOT NULL DEFAULT TRUE,
+    created_at       TIMESTAMPTZ NOT NULL,
+    last_fired_at    TIMESTAMPTZ,
+    fire_count       UBIGINT     NOT NULL DEFAULT 0
+);
+
+-- ── Cron schedules ────────────────────────────────────────────────────────────
+-- Each row is a recurring task template. `cron_expr` is a 5-field cron
+-- expression in UTC (`min hour dom month dow`). `next_run_at` is recomputed
+-- after each fire. `enabled=FALSE` pauses the schedule without deleting it.
+CREATE TABLE IF NOT EXISTS schedules (
+    id               VARCHAR     PRIMARY KEY,
+    cron_expr        VARCHAR     NOT NULL,
+    project          VARCHAR     NOT NULL,
+    assigned_agent   VARCHAR     NOT NULL,
+    skill            VARCHAR,
+    model            VARCHAR     NOT NULL,
+    payload          TEXT        NOT NULL,
+    priority         TINYINT     NOT NULL DEFAULT 5,
+    enabled          BOOLEAN     NOT NULL DEFAULT TRUE,
+    next_run_at      TIMESTAMPTZ NOT NULL,
+    last_fired_at    TIMESTAMPTZ,
+    fire_count       UBIGINT     NOT NULL DEFAULT 0,
+    created_at       TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(enabled, next_run_at);
 "#;

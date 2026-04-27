@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
@@ -72,12 +72,24 @@ pub fn build(lake: Lake, bus: Bus, nemotron: Arc<NemotronClient>) -> Router {
         .route("/api/nemotron/:model/generate", post(nemotron_generate))
         // Publishing skip-rules supersedes the existing rule set — gate it.
         .route("/api/solver/skip-rules", post(publish_skip_rules))
+        // Trigger management — anyone with the API key can register webhooks
+        // and schedules. The actual fire endpoint (POST /webhooks/:id) is
+        // intentionally public so external systems can hit it.
+        .route("/api/webhooks", post(crate::triggers::create_webhook))
+        .route("/api/webhooks/:hook_id", axum::routing::delete(crate::triggers::delete_webhook))
+        .route("/api/schedules", post(crate::triggers::create_schedule))
+        .route("/api/schedules/:id", axum::routing::delete(crate::triggers::delete_schedule))
         .route_layer(middleware::from_fn(require_api_key));
 
-    // Public: read-only / health / dashboard. Anyone can call.
+    // Public: read-only / health / dashboard / webhook fire. Anyone can call.
     let public = Router::new()
         // ── UI ─────────────────────────────────────────────────────────────
         .route("/", get(ui_index))
+        // ── Webhook fire (public by design — that's the trigger contract) ──
+        .route("/webhooks/:hook_id", post(crate::triggers::fire_webhook))
+        // ── Trigger listing ────────────────────────────────────────────────
+        .route("/api/webhooks", get(crate::triggers::list_webhooks))
+        .route("/api/schedules", get(crate::triggers::list_schedules))
         // ── Task queries ───────────────────────────────────────────────────
         .route("/api/tasks", get(list_tasks))
         .route("/api/tasks/:id", get(get_task))

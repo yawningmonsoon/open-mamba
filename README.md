@@ -67,29 +67,84 @@ mamba auth | refresh     # legacy: pull OAuth from keychain (not needed for defa
 
 ---
 
-## Submitting work
+## Three ways to submit work
+
+### 1. Direct ingest
 
 ```bash
 curl -X POST http://localhost:1337/ingest \
   -H 'content-type: application/json' \
   -d '{
-    "project":        "spinner",
+    "project":        "demo",
     "assigned_agent": "coder",
-    "skill":          "simplify",
     "model":          "claude-opus-4-7",
-    "payload":        "Read /Users/me/repo/CLAUDE.md, summarize the deploy section in 100 words.",
+    "payload":        "Summarize the deploy docs in 100 words.",
     "priority":       1,
     "source":         "claude_opus"
   }'
-# → {"id":"3746520a-105b-4b7f-9777-446dfe6033ff"}
+# → {"id":"<uuid>"}
 ```
 
-The worker picks it up within ~2 seconds. Track with:
+The worker picks it up within ~2 seconds. Track with `GET /api/tasks/<id>`.
+
+### 2. HTTP webhook (n8n-style trigger)
+
+Register a webhook once:
 
 ```bash
-curl -s http://localhost:1337/api/tasks/3746520a-105b-4b7f-9777-446dfe6033ff
-# → {"status":"done","cost_usd":0.0252,"tokens_out":1005, ...}
+curl -X POST http://localhost:1337/api/webhooks \
+  -H 'content-type: application/json' \
+  -d '{
+    "hook_id":          "github-pr-summary",
+    "project":          "demo",
+    "assigned_agent":   "coder",
+    "model":            "claude-opus-4-7",
+    "payload_template": "Summarize this GitHub PR in three bullets.",
+    "priority":         1
+  }'
 ```
+
+Then any external service can fire it (no auth required by default — gate
+with `MAMBA_API_KEY` for sensitive hooks):
+
+```bash
+curl -X POST http://localhost:1337/webhooks/github-pr-summary \
+  -H 'content-type: application/json' \
+  -d '{"pr_url":"https://github.com/owner/repo/pull/42","title":"..."}'
+# → {"hook_id":"github-pr-summary","task_id":"<uuid>"}
+```
+
+The webhook's `payload_template` and the request body are bundled into a
+JSON object that becomes the task payload, so the agent sees both.
+
+### 3. Cron schedule
+
+```bash
+curl -X POST http://localhost:1337/api/schedules \
+  -H 'content-type: application/json' \
+  -d '{
+    "id":             "daily-summary",
+    "cron_expr":      "0 9 * * *",
+    "project":        "demo",
+    "assigned_agent": "coder",
+    "model":          "claude-opus-4-7",
+    "payload":        "Summarize yesterday'\''s tasks across the queue."
+  }'
+# → {"id":"daily-summary","next_run_at":"2026-04-28T09:00:00+00:00"}
+```
+
+Standard 5-field cron expressions in UTC. The schedule worker ticks every
+30 seconds and fires due schedules exactly once per match.
+
+### Listing + management
+
+| Endpoint | What |
+|---|---|
+| `GET /api/webhooks` | list all registered hooks |
+| `DELETE /api/webhooks/:hook_id` | remove a hook |
+| `GET /api/schedules` | list all schedules with `next_run_at` |
+| `DELETE /api/schedules/:id` | remove a schedule |
+| `GET /api/tasks/:id` | inspect any task by id |
 
 ---
 

@@ -1,7 +1,9 @@
-//! Main bus dispatcher. Routes TaskEnvelopes to:
-//!   - nemotron/taifoon|polymarket|algotrada → mamba-nemotron client (direct)
-//!   - all other models → openfang CronJob
-//! Also triggers billing_worker on completion.
+//! Main bus dispatcher. Routes `TaskEnvelopes` to:
+//!
+//! - nemotron/taifoon|polymarket|algotrada → mamba-nemotron client (direct)
+//! - all other models → openfang one-shot agent turn
+//!
+//! Also triggers `billing_worker` on completion.
 
 use crate::{billing_worker::BillingWorker, openfang::OpenfangClient};
 use anyhow::Result;

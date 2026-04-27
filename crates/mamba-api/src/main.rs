@@ -1,4 +1,7 @@
+mod cron_util;
 mod routes;
+mod scheduler;
+mod triggers;
 mod worker;
 
 use anyhow::Result;
@@ -39,6 +42,9 @@ async fn main() -> Result<()> {
     // routes each through the bus. Replaces openfang's cron scheduler
     // entirely — each task fires exactly once.
     worker::spawn(lake.clone(), bus.clone());
+
+    // Spawn the schedule worker: every 30s, fires due cron schedules.
+    scheduler::spawn(lake.clone(), bus.clone());
 
     let app = routes::build(lake, bus, nemotron)
         .layer(CorsLayer::permissive());

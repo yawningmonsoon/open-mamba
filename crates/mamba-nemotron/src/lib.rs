@@ -7,18 +7,15 @@
 //!
 //! ## Configuration
 //!
-//!   - `NEMOTRON_BASE_URL` — required. The provider's base URL.
-//!                           Must expose `<base>/<adapter>/generate`
-//!                           (POST JSON) and `<base>/<adapter>/health`.
-//!   - `TAIFOON_GRID_KEY`  — optional. Taifoon-grid API key (`taif-…`)
-//!                           sent as `x-taifoon-key`. Use this when the
-//!                           upstream is a taifoon-grid endpoint. Get
-//!                           a key by registering a wallet at
-//!                           `<grid>/api/grid/register` (deterministic,
-//!                           derived on-chain from wallet + chainId).
-//!   - `NEMOTRON_API_KEY`  — optional. Sent as `Authorization: Bearer …`.
-//!                           Use for non-taifoon providers (vLLM,
-//!                           Ollama, generic OpenAI-compatible).
+//! - `NEMOTRON_BASE_URL` — required. The provider's base URL. Must expose
+//!   `<base>/<adapter>/generate` (POST JSON) and `<base>/<adapter>/health`.
+//! - `TAIFOON_GRID_KEY` — optional. Taifoon-grid API key (`taif-…`) sent as
+//!   `x-taifoon-key`. Use this when the upstream is a taifoon-grid
+//!   endpoint. Get a key by registering a wallet at
+//!   `<grid>/api/grid/register` (deterministic, derived on-chain from
+//!   wallet + chainId).
+//! - `NEMOTRON_API_KEY` — optional. Sent as `Authorization: Bearer …`.
+//!   Use for non-taifoon providers (vLLM, Ollama, generic OpenAI-compatible).
 //!
 //! Both auth headers are forwarded if both are set, so a single client
 //! can talk to either kind of provider depending on what it expects.
