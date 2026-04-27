@@ -1,0 +1,11 @@
+[agent]
+slug = "devops-lead"
+role = "deployer"
+description = "K8s deploys, docker builds, infra automation"
+model = "nemotron/taifoon"
+skills = ["deployment-status", "k8s-logs"]
+delivery_channel = "telegram"
+delivery_to = "8510452953"
+
+[openfang]
+agent_name = "devops-lead"

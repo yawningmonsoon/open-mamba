@@ -1,0 +1,11 @@
+[agent]
+slug = "taifoon-intel"
+role = "protocol-intel"
+description = "Taifoon protocol queries — native nemotron/taifoon adapter"
+model = "nemotron/taifoon"
+skills = ["taifoon-agent"]
+delivery_channel = "telegram"
+delivery_to = "8510452953"
+
+[openfang]
+agent_name = "taifoon-intel"

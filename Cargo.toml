@@ -1,0 +1,56 @@
+[workspace]
+members = [
+    "crates/mamba-types",
+    "crates/mamba-lake",
+    "crates/mamba-bus",
+    "crates/mamba-chain",
+    "crates/mamba-nemotron",
+    "crates/mamba-api",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["yawningmonsoon"]
+license = "MIT"
+
+[workspace.dependencies]
+# async
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# serde
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# db
+duckdb = { version = "1.1", features = ["bundled"] }
+
+# crypto / chain
+alloy = { version = "0.7", features = ["full"] }
+hex = "0.4"
+sha2 = "0.10"
+hmac = "0.12"
+aes-gcm = "0.10"
+
+# mamba-ssm state space (Python bridge)
+pyo3 = { version = "0.21", features = ["auto-initialize"] }
+
+# observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# misc
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+thiserror = "1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures = "0.3"
+dashmap = "6"
+dotenvy = "0.15"
+base64 = "0.22"
+rand = "0.8"

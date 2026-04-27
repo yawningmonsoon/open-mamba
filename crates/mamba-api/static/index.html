@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>open-mamba</title>
+  <style>
+    :root {
+      --bg:         #0a0a0f;
+      --surface:    #111118;
+      --surface2:   #18181f;
+      --border:     #2a2a35;
+      --accent:     #7c6af7;
+      --accent2:    #4ade80;
+      --accent3:    #f472b6;
+      --accent4:    #38bdf8;
+      --text:       #e4e4f0;
+      --muted:      #6b6b82;
+      --danger:     #f87171;
+      --warn:       #fbbf24;
+      --radius:     10px;
+      --font:       'Inter', system-ui, sans-serif;
+      --mono:       'JetBrains Mono', 'Fira Code', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top nav ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 24px;
+      height: 56px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      position: sticky; top: 0; z-index: 100;
+    }
+    .logo {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--accent);
+    }
+    .logo span { color: var(--text); }
+    nav { display: flex; gap: 2px; margin-left: 16px; }
+    nav button {
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); font-size: 13px; font-family: var(--font);
+      padding: 6px 14px; border-radius: 6px; transition: all .15s;
+    }
+    nav button:hover { background: var(--surface2); color: var(--text); }
+    nav button.active { background: var(--surface2); color: var(--accent); }
+    .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent2);
+      box-shadow: 0 0 6px var(--accent2);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .status-dot.red { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+
+    /* ── Layout ── */
+    main { flex: 1; padding: 24px; max-width: 1400px; width: 100%; margin: 0 auto; }
+
+    /* ── Pages ── */
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .card-title {
+      font-size: 12px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .8px; color: var(--muted); margin-bottom: 16px;
+    }
+
+    /* ── Grid ── */
+    .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 24px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2,1fr); gap: 16px; margin-bottom: 24px; }
+    @media(max-width:900px) { .grid-4 { grid-template-columns: repeat(2,1fr); } .grid-2 { grid-template-columns: 1fr; } }
+
+    /* ── Stat cards ── */
+    .stat { padding: 20px; }
+    .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; }
+    .stat-value { font-size: 28px; font-weight: 700; font-family: var(--mono); line-height: 1; }
+    .stat-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .stat-value.green { color: var(--accent2); }
+    .stat-value.purple { color: var(--accent); }
+    .stat-value.pink { color: var(--accent3); }
+    .stat-value.blue { color: var(--accent4); }
+
+    /* ── Table ── */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left; font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .6px;
+      color: var(--muted); padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    td { padding: 10px 12px; font-size: 13px; border-bottom: 1px solid #1e1e28; font-family: var(--mono); }
+    tr:hover td { background: var(--surface2); }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 8px; border-radius: 4px;
+      font-size: 11px; font-weight: 600; font-family: var(--font);
+    }
+    .badge-pending  { background: #2d2d1a; color: var(--warn); }
+    .badge-dispatched { background: #1a2d3a; color: var(--accent4); }
+    .badge-running  { background: #1a2a1a; color: var(--accent2); }
+    .badge-done     { background: #1a2a1a; color: var(--accent2); }
+    .badge-failed   { background: #2d1a1a; color: var(--danger); }
+    .badge-nemotron { background: #231a38; color: var(--accent); }
+    .badge-claude   { background: #1a2438; color: var(--accent4); }
+
+    /* ── Burn bar ── */
+    .burn-bar-wrap { display: flex; flex-direction: column; gap: 8px; }
+    .burn-row { display: flex; align-items: center; gap: 10px; }
+    .burn-label { width: 120px; font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .burn-bar-bg { flex: 1; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+    .burn-bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--accent3)); }
+    .burn-cost { width: 70px; text-align: right; font-size: 12px; font-family: var(--mono); color: var(--muted); }
+
+    /* ── Form ── */
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media(max-width:700px) { .form-grid { grid-template-columns: 1fr; } }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group.full { grid-column: 1/-1; }
+    label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+    input, select, textarea {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); font-family: var(--font); font-size: 13px;
+      padding: 8px 12px; outline: none; transition: border .15s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+    textarea { resize: vertical; min-height: 100px; font-family: var(--mono); }
+    select option { background: var(--surface2); }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 600;
+      font-family: var(--font); cursor: pointer; border: none; transition: all .15s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #9580ff; }
+    .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Section title ── */
+    .section-title {
+      font-size: 20px; font-weight: 700; margin-bottom: 6px;
+    }
+    .section-sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+
+    /* ── Nemotron panel ── */
+    .model-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .model-row:last-child { border-bottom: none; }
+    .model-name { font-weight: 600; width: 120px; }
+    .model-desc { color: var(--muted); font-size: 12px; flex: 1; }
+    .model-health { font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 4px; }
+    .health-ok { background: #1a2a1a; color: var(--accent2); }
+    .health-err { background: #2d1a1a; color: var(--danger); }
+
+    /* ── Token timeline ── */
+    .timeline { display: flex; flex-direction: column; gap: 4px; }
+    .tl-row { display: flex; align-items: center; gap: 10px; }
+    .tl-day { width: 80px; font-size: 11px; color: var(--muted); font-family: var(--mono); }
+    .tl-bar-bg { flex: 1; height: 20px; background: var(--surface2); border-radius: 4px; overflow: hidden; position: relative; }
+    .tl-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent) 0%, var(--accent4) 100%); border-radius: 4px; transition: width .3s; }
+    .tl-val { width: 80px; font-size: 11px; font-family: var(--mono); text-align: right; color: var(--text); }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 12px 20px;
+      font-size: 13px; max-width: 320px;
+      transform: translateY(100px); opacity: 0;
+      transition: all .25s; z-index: 9999;
+    }
+    #toast.show { transform: translateY(0); opacity: 1; }
+    #toast.success { border-color: var(--accent2); color: var(--accent2); }
+    #toast.error { border-color: var(--danger); color: var(--danger); }
+
+    /* ── Empty state ── */
+    .empty { text-align: center; padding: 48px 0; color: var(--muted); font-size: 13px; }
+
+    /* ── Spacing utils ── */
+    .mb16 { margin-bottom: 16px; }
+    .mb24 { margin-bottom: 24px; }
+    .flex { display: flex; align-items: center; gap: 12px; }
+    .spacer { flex: 1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">open<span>-mamba</span></div>
+  <nav id="nav">
+    <button class="active" onclick="showPage('dashboard')">Dashboard</button>
+    <button onclick="showPage('tasks')">Tasks</button>
+    <button onclick="showPage('submit')">Submit</button>
+    <button onclick="showPage('analytics')">Analytics</button>
+    <button onclick="showPage('models')">Models</button>
+  </nav>
+  <div class="header-right">
+    <div id="health-dot" class="status-dot red" title="Checking..."></div>
+    <span id="health-label" style="font-size:12px;color:var(--muted)">checking</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── DASHBOARD ── -->
+  <div class="page active" id="page-dashboard">
+    <div class="section-title">Dashboard</div>
+    <div class="section-sub">Global token burn and agent activity across all projects</div>
+
+    <div class="grid-4">
+      <div class="card stat">
+        <div class="stat-label">Total Tasks</div>
+        <div class="stat-value purple" id="stat-tasks">—</div>
+        <div class="stat-sub">all time</div>
+      </div>
+      <div class="card stat">
+        <div class="stat-label">Total Tokens</div>
+        <div class="stat-value blue" id="stat-tokens">—</div>
+        <div class="stat-sub">in + out</div>
+      </div>
+      <div class="card stat">
+        <div class="stat-label">Total Cost</div>
+        <div class="stat-value green" id="stat-cost">—</div>
+        <div class="stat-sub">USD, all agents</div>
+      </div>
+      <div class="card stat">
+        <div class="stat-label">Nemotron GPU</div>
+        <div class="stat-value pink" id="stat-nemotron">—</div>
+        <div class="stat-sub">free inference saved</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">Burn by Project</div>
+        <div class="burn-bar-wrap" id="project-burn">
+          <div class="empty">loading...</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Burn by Agent</div>
+        <div class="burn-bar-wrap" id="agent-burn">
+          <div class="empty">loading...</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">30-Day Token Timeline</div>
+      <div class="timeline" id="daily-timeline">
+        <div class="empty">loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TASKS ── -->
+  <div class="page" id="page-tasks">
+    <div class="flex mb24">
+      <div>
+        <div class="section-title">Task Queue</div>
+        <div class="section-sub">All envelopes — source, agent, model, status, chain anchor</div>
+      </div>
+      <div class="spacer"></div>
+      <select id="filter-status" onchange="loadTasks()" style="width:140px">
+        <option value="">All statuses</option>
+        <option value="pending">Pending</option>
+        <option value="dispatched">Dispatched</option>
+        <option value="running">Running</option>
+        <option value="done">Done</option>
+        <option value="failed">Failed</option>
+      </select>
+      <button class="btn btn-ghost" onclick="loadTasks()">↻ Refresh</button>
+    </div>
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Project</th>
+              <th>Agent</th>
+              <th>Model</th>
+              <th>Priority</th>
+              <th>Status</th>
+              <th>Tokens</th>
+              <th>Cost</th>
+              <th>Chain</th>
+              <th>Created</th>
+            </tr>
+          </thead>
+          <tbody id="task-tbody">
+            <tr><td colspan="10" class="empty">loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SUBMIT ── -->
+  <div class="page" id="page-submit">
+    <div class="section-title">Submit Task</div>
+    <div class="section-sub">Ingest a TaskEnvelope into the bus — routes to nemotron or openfang</div>
+    <div class="card" style="max-width:700px">
+      <form id="submit-form" onsubmit="submitTask(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Project</label>
+            <input id="f-project" type="text" placeholder="spinner" required />
+          </div>
+          <div class="form-group">
+            <label>Agent</label>
+            <select id="f-agent">
+              <option value="coder">coder (code-deliverer)</option>
+              <option value="devops-lead">devops-lead (deployer)</option>
+              <option value="code-reviewer">code-reviewer (auditor)</option>
+              <option value="planner">planner</option>
+              <option value="taifoon-intel">taifoon-intel (protocol)</option>
+              <option value="market-intel">market-intel (polymarket)</option>
+              <option value="algo-trader">algo-trader</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Model</label>
+            <select id="f-model">
+              <option value="nemotron/taifoon">nemotron/taifoon (GPU, free)</option>
+              <option value="nemotron/polymarket">nemotron/polymarket (GPU, free)</option>
+              <option value="nemotron/algotrada">nemotron/algotrada (GPU, free)</option>
+              <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
+              <option value="claude-opus-4-7">claude-opus-4-7</option>
+              <option value="claude-haiku-4-5-20251001">claude-haiku (fast, cheap)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Skill</label>
+            <input id="f-skill" type="text" placeholder="fix-collector (optional)" />
+          </div>
+          <div class="form-group">
+            <label>Priority (1=high)</label>
+            <input id="f-priority" type="number" value="5" min="1" max="10" />
+          </div>
+          <div class="form-group">
+            <label>Source</label>
+            <select id="f-source">
+              <option value="api">API</option>
+              <option value="claude-desktop">Claude Desktop</option>
+              <option value="claude-opus">Claude Opus</option>
+              <option value="cron">Cron</option>
+            </select>
+          </div>
+          <div class="form-group full">
+            <label>Payload</label>
+            <textarea id="f-payload" placeholder="Describe the task..." required></textarea>
+          </div>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
+          <button type="submit" class="btn btn-primary" id="submit-btn">Submit Task</button>
+          <span id="submit-result" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── ANALYTICS ── -->
+  <div class="page" id="page-analytics">
+    <div class="section-title">Analytics</div>
+    <div class="section-sub">DuckDB-powered token and cost analytics — all time, all agents, all projects</div>
+
+    <div class="card mb24">
+      <div class="card-title">Global Consumption</div>
+      <div id="analytics-global" class="empty">loading...</div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">Per Project</div>
+        <div id="analytics-projects" class="empty">loading...</div>
+      </div>
+      <div class="card">
+        <div class="card-title">Per Agent × Model</div>
+        <div id="analytics-agents" class="empty">loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MODELS ── -->
+  <div class="page" id="page-models">
+    <div class="section-title">Nemotron GPU Models</div>
+    <div class="section-sub">Live inference on scanner.taifoon.dev · NVIDIA Nemotron-3-Nano-4B-BF16 · 3 QLoRA adapters</div>
+
+    <div class="card mb24">
+      <div class="model-row">
+        <div class="model-name" style="color:var(--accent)">taifoon</div>
+        <div class="model-desc">Protocol intel, V5 finality, solver economics</div>
+        <div id="health-taifoon" class="model-health health-err">checking</div>
+      </div>
+      <div class="model-row">
+        <div class="model-name" style="color:var(--accent3)">polymarket</div>
+        <div class="model-desc">15-min crypto predictions, market sentiment</div>
+        <div id="health-polymarket" class="model-health health-err">checking</div>
+      </div>
+      <div class="model-row">
+        <div class="model-name" style="color:var(--accent4)">algotrada</div>
+        <div class="model-desc">Cross-DEX arbitrage, execution intent</div>
+        <div id="health-algotrada" class="model-health health-err">checking</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Try a prompt</div>
+      <div class="form-grid" style="max-width:600px">
+        <div class="form-group">
+          <label>Adapter</label>
+          <select id="try-model">
+            <option value="taifoon">taifoon</option>
+            <option value="polymarket">polymarket</option>
+            <option value="algotrada">algotrada</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Max tokens</label>
+          <input id="try-tokens" type="number" value="80" min="10" max="512" />
+        </div>
+        <div class="form-group full">
+          <label>Prompt</label>
+          <textarea id="try-prompt" rows="3" placeholder="Ask something about the Taifoon protocol...">What is the Taifoon V5 proof format?</textarea>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:12px" onclick="tryPrompt()">Run</button>
+      <div id="try-result" style="margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--text);white-space:pre-wrap;background:var(--surface2);padding:12px;border-radius:6px;display:none"></div>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+const API = '';  // same origin
+
+// ── Navigation ────────────────────────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  [...document.querySelectorAll('nav button')].find(b => b.textContent.toLowerCase().includes(name.split('-')[0]))?.classList.add('active');
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'tasks') loadTasks();
+  if (name === 'analytics') loadAnalytics();
+  if (name === 'models') loadModelHealth();
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + type;
+  setTimeout(() => t.className = '', 3000);
+}
+
+// ── Fetch helpers ─────────────────────────────────────────────────────────────
+async function api(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ── Health ────────────────────────────────────────────────────────────────────
+async function checkHealth() {
+  try {
+    await api('/health');
+    document.getElementById('health-dot').classList.remove('red');
+    document.getElementById('health-label').textContent = 'online';
+  } catch {
+    document.getElementById('health-dot').classList.add('red');
+    document.getElementById('health-label').textContent = 'offline';
+  }
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  try {
+    const [global, projects, agents, daily] = await Promise.all([
+      api('/api/analytics/global'),
+      api('/api/analytics/projects'),
+      api('/api/analytics/agents'),
+      api('/api/analytics/daily'),
+    ]);
+
+    document.getElementById('stat-tasks').textContent = fmt(global.total_tasks);
+    document.getElementById('stat-tokens').textContent = fmtTokens(global.total_tokens);
+    document.getElementById('stat-cost').textContent = '$' + global.total_cost_usd.toFixed(4);
+
+    // Nemotron free saves = tasks using nemotron * avg cloud cost estimate
+    const nemotronTasks = (agents || []).filter(a => a.model?.startsWith('nemotron'));
+    const saved = nemotronTasks.reduce((s, a) => s + a.tasks * 0.002, 0);
+    document.getElementById('stat-nemotron').textContent = '$' + saved.toFixed(3) + ' saved';
+
+    renderBurnBars('project-burn', (projects||[]).map(p => ({ label: p.project, cost: p.cost_usd })));
+    renderBurnBars('agent-burn', (agents||[]).map(a => ({ label: a.agent_slug, cost: a.cost_usd })));
+    renderTimeline('daily-timeline', daily||[]);
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function renderBurnBars(elId, items) {
+  const el = document.getElementById(elId);
+  if (!items.length) { el.innerHTML = '<div class="empty">no data</div>'; return; }
+  const max = Math.max(...items.map(i => i.cost), 0.0001);
+  el.innerHTML = items.slice(0,10).map(i => `
+    <div class="burn-row">
+      <div class="burn-label" title="${i.label}">${i.label}</div>
+      <div class="burn-bar-bg"><div class="burn-bar-fill" style="width:${(i.cost/max*100).toFixed(1)}%"></div></div>
+      <div class="burn-cost">$${i.cost.toFixed(4)}</div>
+    </div>`).join('');
+}
+
+function renderTimeline(elId, days) {
+  const el = document.getElementById(elId);
+  if (!days.length) { el.innerHTML = '<div class="empty">no data</div>'; return; }
+  const max = Math.max(...days.map(d => d.tokens), 1);
+  el.innerHTML = days.slice(0,14).map(d => `
+    <div class="tl-row">
+      <div class="tl-day">${d.day}</div>
+      <div class="tl-bar-bg"><div class="tl-bar-fill" style="width:${(d.tokens/max*100).toFixed(1)}%"></div></div>
+      <div class="tl-val">${fmtTokens(d.tokens)} · $${d.cost_usd.toFixed(3)}</div>
+    </div>`).join('');
+}
+
+// ── Tasks ─────────────────────────────────────────────────────────────────────
+async function loadTasks() {
+  const status = document.getElementById('filter-status').value;
+  const url = '/api/tasks' + (status ? '?status=' + status : '');
+  const tbody = document.getElementById('task-tbody');
+  tbody.innerHTML = '<tr><td colspan="10" class="empty">loading...</td></tr>';
+  try {
+    const data = await api(url);
+    // data is currently a stub — show a placeholder table
+    const tasks = data.tasks || [];
+    if (!tasks.length) {
+      tbody.innerHTML = '<tr><td colspan="10" class="empty">no tasks yet — submit one!</td></tr>';
+      return;
+    }
+    tbody.innerHTML = tasks.map(t => `
+      <tr>
+        <td style="font-size:11px">${t.id?.slice(0,8)}…</td>
+        <td>${t.project}</td>
+        <td>${t.assigned_agent}</td>
+        <td><span class="badge ${t.model?.startsWith('nemotron') ? 'badge-nemotron' : 'badge-claude'}">${t.model?.split('/').pop()}</span></td>
+        <td>${t.priority}</td>
+        <td><span class="badge badge-${t.status}">${t.status}</span></td>
+        <td>${t.tokens_in != null ? fmtTokens((t.tokens_in||0)+(t.tokens_out||0)) : '—'}</td>
+        <td>${t.cost_usd != null ? '$'+t.cost_usd.toFixed(4) : '—'}</td>
+        <td>${t.chain_tx ? `<a href="https://taifoon.dev/tx/${t.chain_tx}" target="_blank" style="color:var(--accent4);font-size:11px">⛓ ${t.chain_tx.slice(0,10)}</a>` : '—'}</td>
+        <td style="font-size:11px;color:var(--muted)">${t.created_at?.slice(0,16) || '—'}</td>
+      </tr>`).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="10" class="empty">${e.message}</td></tr>`;
+  }
+}
+
+// ── Submit ────────────────────────────────────────────────────────────────────
+async function submitTask(e) {
+  e.preventDefault();
+  const btn = document.getElementById('submit-btn');
+  const result = document.getElementById('submit-result');
+  btn.disabled = true;
+  result.textContent = 'submitting...';
+  try {
+    const body = {
+      project: document.getElementById('f-project').value,
+      assigned_agent: document.getElementById('f-agent').value,
+      model: document.getElementById('f-model').value,
+      skill: document.getElementById('f-skill').value || undefined,
+      priority: parseInt(document.getElementById('f-priority').value),
+      source: document.getElementById('f-source').value,
+      payload: document.getElementById('f-payload').value,
+    };
+    const r = await fetch(API + '/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    result.style.color = 'var(--accent2)';
+    result.textContent = '✓ accepted — id: ' + data.id;
+    toast('Task submitted: ' + data.id?.slice(0,8), 'success');
+  } catch(e) {
+    result.style.color = 'var(--danger)';
+    result.textContent = '✗ ' + e.message;
+    toast(e.message, 'error');
+  }
+  btn.disabled = false;
+}
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+async function loadAnalytics() {
+  try {
+    const [global, projects, agents] = await Promise.all([
+      api('/api/analytics/global'),
+      api('/api/analytics/projects'),
+      api('/api/analytics/agents'),
+    ]);
+
+    document.getElementById('analytics-global').innerHTML = `
+      <div class="grid-4" style="margin-bottom:0">
+        <div class="stat"><div class="stat-label">Tasks</div><div class="stat-value purple">${fmt(global.total_tasks)}</div></div>
+        <div class="stat"><div class="stat-label">Tokens In</div><div class="stat-value blue">${fmtTokens(global.total_tokens_in)}</div></div>
+        <div class="stat"><div class="stat-label">Tokens Out</div><div class="stat-value blue">${fmtTokens(global.total_tokens_out)}</div></div>
+        <div class="stat"><div class="stat-label">Total Cost</div><div class="stat-value green">$${global.total_cost_usd.toFixed(4)}</div></div>
+      </div>`;
+
+    const projHtml = (projects||[]).slice(0,20).map(p => `
+      <div class="burn-row">
+        <div class="burn-label">${p.project}</div>
+        <div class="burn-bar-bg"><div class="burn-bar-fill" style="width:${Math.min(100,(p.cost_usd/Math.max(...(projects||[]).map(x=>x.cost_usd),0.001))*100).toFixed(0)}%"></div></div>
+        <div class="burn-cost">$${p.cost_usd.toFixed(4)}</div>
+      </div>`).join('');
+    document.getElementById('analytics-projects').innerHTML = projHtml || '<div class="empty">no data</div>';
+
+    const agentHtml = (agents||[]).slice(0,20).map(a => `
+      <div class="burn-row">
+        <div class="burn-label">${a.agent_slug}<br><span style="font-size:10px;color:var(--muted)">${a.model?.split('/').pop()}</span></div>
+        <div class="burn-bar-bg"><div class="burn-bar-fill" style="width:${Math.min(100,(a.cost_usd/Math.max(...(agents||[]).map(x=>x.cost_usd),0.001))*100).toFixed(0)}%"></div></div>
+        <div class="burn-cost">$${a.cost_usd.toFixed(4)}</div>
+      </div>`).join('');
+    document.getElementById('analytics-agents').innerHTML = agentHtml || '<div class="empty">no data</div>';
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+// ── Model health ──────────────────────────────────────────────────────────────
+async function loadModelHealth() {
+  try {
+    const data = await api('/api/nemotron/health');
+    ['taifoon','polymarket','algotrada'].forEach(m => {
+      const el = document.getElementById('health-' + m);
+      if (data[m]) {
+        el.textContent = 'live'; el.className = 'model-health health-ok';
+      } else {
+        el.textContent = 'down'; el.className = 'model-health health-err';
+      }
+    });
+  } catch {}
+}
+
+async function tryPrompt() {
+  const model = document.getElementById('try-model').value;
+  const prompt = document.getElementById('try-prompt').value;
+  const max_tokens = parseInt(document.getElementById('try-tokens').value);
+  const res = document.getElementById('try-result');
+  res.style.display = 'block';
+  res.textContent = 'generating...';
+  try {
+    const r = await fetch(API + '/api/nemotron/' + model + '/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, max_tokens }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error);
+    res.textContent = data.response + '\n\n— ' + data.tokens + ' tokens · ' + data.duration?.toFixed(1) + 's · ' + data.tokens_per_second?.toFixed(1) + ' t/s';
+  } catch(e) {
+    res.textContent = '✗ ' + e.message;
+  }
+}
+
+// ── Formatters ────────────────────────────────────────────────────────────────
+function fmt(n) { return n == null ? '—' : Number(n).toLocaleString(); }
+function fmtTokens(n) {
+  if (n == null) return '—';
+  if (n > 1_000_000) return (n/1_000_000).toFixed(2) + 'M';
+  if (n > 1_000) return (n/1_000).toFixed(1) + 'K';
+  return String(n);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+checkHealth();
+setInterval(checkHealth, 15000);
+loadDashboard();
+</script>
+</body>
+</html>

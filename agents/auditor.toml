@@ -1,0 +1,11 @@
+[agent]
+slug = "code-reviewer"
+role = "auditor"
+description = "Code review — requires real reasoning, uses claude-sonnet"
+model = "claude-sonnet-4-6"
+skills = ["review", "security-review"]
+delivery_channel = "telegram"
+delivery_to = "8510452953"
+
+[openfang]
+agent_name = "code-reviewer"

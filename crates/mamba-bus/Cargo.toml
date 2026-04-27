@@ -1,0 +1,19 @@
+[package]
+name = "mamba-bus"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mamba-types    = { path = "../mamba-types" }
+mamba-lake     = { path = "../mamba-lake" }
+mamba-chain    = { path = "../mamba-chain" }
+mamba-nemotron = { path = "../mamba-nemotron" }
+axum.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true

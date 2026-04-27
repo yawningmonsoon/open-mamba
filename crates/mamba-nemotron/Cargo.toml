@@ -1,0 +1,13 @@
+[package]
+name = "mamba-nemotron"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mamba-types = { path = "../mamba-types" }
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

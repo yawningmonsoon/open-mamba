@@ -1,0 +1,11 @@
+[agent]
+slug = "coder"
+role = "code-deliverer"
+description = "Ships code, fixes bugs across spinner/taifoon/openfang"
+model = "nemotron/taifoon"
+skills = ["fix-collector", "simplify"]
+delivery_channel = "telegram"
+delivery_to = "8510452953"
+
+[openfang]
+agent_name = "coder"
