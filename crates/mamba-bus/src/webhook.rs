@@ -1,7 +1,6 @@
 //! Receives openfang completion webhooks → marks envelope done → triggers billing.
 
 use axum::{extract::State, http::StatusCode, Json};
-use mamba_types::envelope::TaskStatus;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -18,7 +17,7 @@ pub struct CompletionWebhook {
 }
 
 pub async fn handle_completion(
-    State(bus): State<Bus>,
+    State(_bus): State<Bus>,
     Json(payload): Json<CompletionWebhook>,
 ) -> StatusCode {
     // find envelope by openfang_job_id

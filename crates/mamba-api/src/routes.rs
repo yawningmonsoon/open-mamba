@@ -185,7 +185,7 @@ async fn nemotron_generate(
 // ── Webhook ────────────────────────────────────────────────────────────────────
 
 async fn openfang_webhook(
-    State(s): State<AppState>,
+    State(_s): State<AppState>,
     Json(payload): Json<serde_json::Value>,
 ) -> StatusCode {
     tracing::info!(payload = ?payload, "openfang webhook received");
