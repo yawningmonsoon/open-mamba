@@ -116,6 +116,10 @@ impl Bus {
                     cost_usd = result.cost_usd,
                     "openfang dispatch ok"
                 );
+                // Persist the response text first so workflow advancers
+                // can see it. Best-effort: a failure here doesn't block
+                // marking the task complete.
+                let _ = self.lake.save_response(envelope.id, &result.response);
                 self.lake.complete_envelope(
                     envelope.id,
                     result.input_tokens,

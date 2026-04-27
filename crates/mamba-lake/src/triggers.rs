@@ -268,38 +268,5 @@ fn map_schedule(r: &duckdb::Row) -> duckdb::Result<Schedule> {
 }
 
 fn parse_ts(s: String) -> duckdb::Result<DateTime<Utc>> {
-    // DuckDB casts timestamps to strings as `2026-04-27 20:40:32.123456+00`,
-    // which isn't strict RFC3339 (space instead of `T`, no `:` in tz). We
-    // accept both shapes — RFC3339 first (in case some path inserted that),
-    // then DuckDB's native form.
-    if let Ok(dt) = DateTime::parse_from_rfc3339(&s) {
-        return Ok(dt.with_timezone(&Utc));
-    }
-    let normalized = s.replace(' ', "T");
-    // Append the missing colon in the timezone offset (`+00` -> `+00:00`).
-    let normalized = if normalized.ends_with("+00") || normalized.ends_with("-00") {
-        format!("{normalized}:00")
-    } else if normalized.len() >= 3 {
-        let (head, tail) = normalized.split_at(normalized.len() - 3);
-        // tail may already be like `+00` or like `:00`.
-        if (tail.starts_with('+') || tail.starts_with('-')) && !tail.contains(':') {
-            format!("{head}{tail}:00")
-        } else {
-            normalized.clone()
-        }
-    } else {
-        normalized.clone()
-    };
-    DateTime::parse_from_rfc3339(&normalized)
-        .map(|dt| dt.with_timezone(&Utc))
-        .map_err(|e| {
-            duckdb::Error::FromSqlConversionFailure(
-                0,
-                duckdb::types::Type::Any,
-                Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("bad timestamp {s:?} -> {normalized:?}: {e}"),
-                )),
-            )
-        })
+    crate::triggers_parse_ts(s)
 }

@@ -79,6 +79,10 @@ pub fn build(lake: Lake, bus: Bus, nemotron: Arc<NemotronClient>) -> Router {
         .route("/api/webhooks/:hook_id", axum::routing::delete(crate::triggers::delete_webhook))
         .route("/api/schedules", post(crate::triggers::create_schedule))
         .route("/api/schedules/:id", axum::routing::delete(crate::triggers::delete_schedule))
+        // Workflow management — DAG of task templates, n8n-style.
+        .route("/api/workflows", post(crate::workflows::create_workflow))
+        .route("/api/workflows/:id", axum::routing::delete(crate::workflows::delete_workflow))
+        .route("/api/workflows/:id/run", post(crate::workflows::run_workflow))
         .route_layer(middleware::from_fn(require_api_key));
 
     // Public: read-only / health / dashboard / webhook fire. Anyone can call.
@@ -90,6 +94,11 @@ pub fn build(lake: Lake, bus: Bus, nemotron: Arc<NemotronClient>) -> Router {
         // ── Trigger listing ────────────────────────────────────────────────
         .route("/api/webhooks", get(crate::triggers::list_webhooks))
         .route("/api/schedules", get(crate::triggers::list_schedules))
+        // Workflow inspection
+        .route("/api/workflows", get(crate::workflows::list_workflows))
+        .route("/api/workflows/:id", get(crate::workflows::get_workflow))
+        .route("/api/workflows/runs", get(crate::workflows::list_runs))
+        .route("/api/workflows/runs/:run_id", get(crate::workflows::get_run))
         // ── Task queries ───────────────────────────────────────────────────
         .route("/api/tasks", get(list_tasks))
         .route("/api/tasks/:id", get(get_task))

@@ -140,8 +140,15 @@ impl Lake {
 
     pub fn insert_envelope(&self, e: &TaskEnvelope) -> Result<()> {
         let conn = self.conn.lock().unwrap();
+        // Named columns (not VALUES with positional placeholders) so we can
+        // add columns to task_envelopes without breaking inserts.
         conn.execute(
-            "INSERT INTO task_envelopes VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO task_envelopes
+                (id, project, source, assigned_agent, skill, model, payload,
+                 priority, status, openfang_job_id, tokens_in, tokens_out,
+                 cost_usd, encrypted_payload, chain_tx, created_at,
+                 dispatched_at, completed_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             duckdb::params![
                 e.id.to_string(),
                 e.project,
@@ -197,6 +204,31 @@ impl Lake {
             duckdb::params![tokens_in, tokens_out, cost_usd, chain_tx, id.to_string()],
         )?;
         Ok(())
+    }
+
+    /// Persist the agent's response text. Called separately from
+    /// `complete_envelope` so existing call sites don't need to thread
+    /// the response through.
+    pub fn save_response(&self, id: Uuid, response: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE task_envelopes SET response=? WHERE id=?",
+            duckdb::params![response, id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Fetch the response text written by the agent (or None if the task
+    /// hasn't completed or the response wasn't captured).
+    pub fn get_response(&self, id: Uuid) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT response FROM task_envelopes WHERE id=?")?;
+        let row = stmt
+            .query_map(duckdb::params![id.to_string()], |r| r.get::<_, Option<String>>(0))?
+            .filter_map(Result::ok)
+            .next()
+            .flatten();
+        Ok(row)
     }
 
     pub fn query_tasks(

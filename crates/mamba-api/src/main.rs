@@ -3,6 +3,8 @@ mod routes;
 mod scheduler;
 mod triggers;
 mod worker;
+mod workflow_runner;
+mod workflows;
 
 use anyhow::Result;
 use axum::serve;
@@ -45,6 +47,10 @@ async fn main() -> Result<()> {
 
     // Spawn the schedule worker: every 30s, fires due cron schedules.
     scheduler::spawn(lake.clone(), bus.clone());
+
+    // Spawn the workflow advancer: every 2s, advances any workflow run
+    // whose current step has settled.
+    workflow_runner::spawn(lake.clone(), bus.clone());
 
     let app = routes::build(lake, bus, nemotron)
         .layer(CorsLayer::permissive());

@@ -19,8 +19,11 @@ CREATE TABLE IF NOT EXISTS task_envelopes (
     chain_tx        VARCHAR,
     created_at      TIMESTAMPTZ NOT NULL,
     dispatched_at   TIMESTAMPTZ,
-    completed_at    TIMESTAMPTZ
+    completed_at    TIMESTAMPTZ,
+    response        TEXT
 );
+-- Idempotent column add for existing DBs.
+ALTER TABLE task_envelopes ADD COLUMN IF NOT EXISTS response TEXT;
 CREATE INDEX IF NOT EXISTS idx_te_status     ON task_envelopes(status);
 CREATE INDEX IF NOT EXISTS idx_te_project    ON task_envelopes(project);
 CREATE INDEX IF NOT EXISTS idx_te_agent      ON task_envelopes(assigned_agent);
@@ -169,4 +172,48 @@ CREATE TABLE IF NOT EXISTS schedules (
     created_at       TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(enabled, next_run_at);
+
+-- ── Workflows (DAGs of task templates) ────────────────────────────────────────
+-- A workflow is an ordered list of steps. Each step is a task template; the
+-- output of step N is passed as the `__previous` field in step N+1's payload.
+-- For now we only support linear chains — branching is a follow-up.
+--
+-- `steps_json` is an array of:
+--   {
+--     "name":           "step-1",
+--     "project":        "demo",
+--     "assigned_agent": "coder",
+--     "skill":          null,
+--     "model":          "claude-opus-4-7",
+--     "payload":        "string template",
+--     "priority":       5
+--   }
+CREATE TABLE IF NOT EXISTS workflows (
+    id           VARCHAR     PRIMARY KEY,
+    name         VARCHAR     NOT NULL,
+    steps_json   TEXT        NOT NULL,
+    enabled      BOOLEAN     NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMPTZ NOT NULL,
+    last_run_at  TIMESTAMPTZ,
+    run_count    UBIGINT     NOT NULL DEFAULT 0
+);
+
+-- ── Workflow runs (one per launch) ────────────────────────────────────────────
+-- `outputs_json` is an array of completed step outputs (responses), grown as
+-- the run progresses. `current_step` is the next step index to dispatch (0
+-- means nothing fired yet, len(steps) means all done).
+CREATE TABLE IF NOT EXISTS workflow_runs (
+    run_id          VARCHAR     PRIMARY KEY,
+    workflow_id     VARCHAR     NOT NULL,
+    status          VARCHAR     NOT NULL DEFAULT 'pending',
+    current_step    INTEGER     NOT NULL DEFAULT 0,
+    outputs_json    TEXT        NOT NULL DEFAULT '[]',
+    initial_input   TEXT,
+    started_at      TIMESTAMPTZ NOT NULL,
+    completed_at    TIMESTAMPTZ,
+    error           VARCHAR,
+    current_task_id UUID
+);
+CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status);
+CREATE INDEX IF NOT EXISTS idx_runs_task   ON workflow_runs(current_task_id);
 "#;
