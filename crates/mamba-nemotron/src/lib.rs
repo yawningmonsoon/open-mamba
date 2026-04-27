@@ -73,7 +73,7 @@ impl NemotronClient {
         Self {
             base_url: base_url.into(),
             http: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(120))
+                .timeout(std::time::Duration::from_secs(300))
                 .build()
                 .unwrap(),
         }

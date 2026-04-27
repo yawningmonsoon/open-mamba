@@ -445,14 +445,15 @@
         </div>
         <div class="form-group">
           <label>Max tokens</label>
-          <input id="try-tokens" type="number" value="80" min="10" max="512" />
+          <input id="try-tokens" type="number" value="40" min="5" max="200" />
         </div>
         <div class="form-group full">
           <label>Prompt</label>
           <textarea id="try-prompt" rows="3" placeholder="Ask something about the Taifoon protocol...">What is the Taifoon V5 proof format?</textarea>
         </div>
       </div>
-      <button class="btn btn-primary" style="margin-top:12px" onclick="tryPrompt()">Run</button>
+      <div style="font-size:11px;color:var(--muted);margin-top:8px">⚡ GPU inference ~0.74 tok/s · 20 tokens ≈ 27s · adapters need retraining (repetition artifacts)</div>
+      <button class="btn btn-primary" style="margin-top:12px" id="try-run-btn" onclick="tryPrompt()">Run</button>
       <div id="try-result" style="margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--text);white-space:pre-wrap;background:var(--surface2);padding:12px;border-radius:6px;display:none"></div>
     </div>
   </div>
@@ -470,8 +471,9 @@ function showPage(name) {
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
   [...document.querySelectorAll('nav button')].find(b => b.textContent.toLowerCase().includes(name.split('-')[0]))?.classList.add('active');
+  stopTaskPoll();
   if (name === 'dashboard') loadDashboard();
-  if (name === 'tasks') loadTasks();
+  if (name === 'tasks') startTaskPoll();
   if (name === 'analytics') loadAnalytics();
   if (name === 'models') loadModelHealth();
 }
@@ -555,35 +557,49 @@ function renderTimeline(elId, days) {
 }
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
-async function loadTasks() {
+let _taskPollTimer = null;
+
+function renderTaskRow(t) {
+  const tokens = (t.tokens_in || 0) + (t.tokens_out || 0);
+  return `<tr>
+    <td style="font-size:11px;font-family:monospace" title="${t.id}">${t.id.slice(0,8)}…</td>
+    <td>${t.project}</td>
+    <td style="font-size:11px">${t.assigned_agent}</td>
+    <td><span class="badge ${t.model?.startsWith('nemotron') ? 'badge-nemotron' : 'badge-claude'}">${t.model?.split('/').pop()}</span></td>
+    <td style="text-align:center">${t.priority}</td>
+    <td><span class="badge badge-${t.status}">${t.status}</span></td>
+    <td style="text-align:right">${tokens ? fmtTokens(tokens) : '—'}</td>
+    <td style="text-align:right">${t.cost_usd != null ? '$'+Number(t.cost_usd).toFixed(4) : '—'}</td>
+    <td>${t.chain_tx ? `<a href="https://taifoon.dev/tx/${t.chain_tx}" target="_blank" style="color:var(--accent4);font-size:11px">⛓ ${t.chain_tx.slice(0,10)}</a>` : '—'}</td>
+    <td style="font-size:11px;color:var(--muted)">${(t.created_at||'').slice(0,16) || '—'}</td>
+  </tr>`;
+}
+
+async function loadTasks(silent = false) {
   const status = document.getElementById('filter-status').value;
-  const url = '/api/tasks' + (status ? '?status=' + status : '');
   const tbody = document.getElementById('task-tbody');
-  tbody.innerHTML = '<tr><td colspan="10" class="empty">loading...</td></tr>';
+  let url = '/api/tasks?limit=200';
+  if (status) url += '&status=' + encodeURIComponent(status);
+  if (!silent) tbody.innerHTML = '<tr><td colspan="10" class="empty">loading…</td></tr>';
   try {
-    const data = await api(url);
-    // data is currently a stub — show a placeholder table
-    const tasks = data.tasks || [];
-    if (!tasks.length) {
+    const tasks = await api(url);
+    if (!Array.isArray(tasks) || !tasks.length) {
       tbody.innerHTML = '<tr><td colspan="10" class="empty">no tasks yet — submit one!</td></tr>';
       return;
     }
-    tbody.innerHTML = tasks.map(t => `
-      <tr>
-        <td style="font-size:11px">${t.id?.slice(0,8)}…</td>
-        <td>${t.project}</td>
-        <td>${t.assigned_agent}</td>
-        <td><span class="badge ${t.model?.startsWith('nemotron') ? 'badge-nemotron' : 'badge-claude'}">${t.model?.split('/').pop()}</span></td>
-        <td>${t.priority}</td>
-        <td><span class="badge badge-${t.status}">${t.status}</span></td>
-        <td>${t.tokens_in != null ? fmtTokens((t.tokens_in||0)+(t.tokens_out||0)) : '—'}</td>
-        <td>${t.cost_usd != null ? '$'+t.cost_usd.toFixed(4) : '—'}</td>
-        <td>${t.chain_tx ? `<a href="https://taifoon.dev/tx/${t.chain_tx}" target="_blank" style="color:var(--accent4);font-size:11px">⛓ ${t.chain_tx.slice(0,10)}</a>` : '—'}</td>
-        <td style="font-size:11px;color:var(--muted)">${t.created_at?.slice(0,16) || '—'}</td>
-      </tr>`).join('');
+    tbody.innerHTML = tasks.map(renderTaskRow).join('');
   } catch(e) {
-    tbody.innerHTML = `<tr><td colspan="10" class="empty">${e.message}</td></tr>`;
+    if (!silent) tbody.innerHTML = `<tr><td colspan="10" class="empty">${e.message}</td></tr>`;
   }
+}
+
+function startTaskPoll() {
+  loadTasks();
+  _taskPollTimer = setInterval(() => loadTasks(true), 3000);
+}
+function stopTaskPoll() {
+  clearInterval(_taskPollTimer);
+  _taskPollTimer = null;
 }
 
 // ── Submit ────────────────────────────────────────────────────────────────────
@@ -673,24 +689,51 @@ async function loadModelHealth() {
   } catch {}
 }
 
+const MODEL_PROMPTS = {
+  taifoon:    'What is the Taifoon V5 proof format?',
+  polymarket: 'What is your BTC/USD 15-minute price prediction?',
+  algotrada:  'Describe an ETH/USDC cross-DEX arbitrage opportunity.',
+};
+
+document.getElementById('try-model').addEventListener('change', function() {
+  document.getElementById('try-prompt').value = MODEL_PROMPTS[this.value] || '';
+});
+
 async function tryPrompt() {
   const model = document.getElementById('try-model').value;
-  const prompt = document.getElementById('try-prompt').value;
-  const max_tokens = parseInt(document.getElementById('try-tokens').value);
+  const prompt = document.getElementById('try-prompt').value.trim();
+  const max_tokens = parseInt(document.getElementById('try-tokens').value) || 40;
   const res = document.getElementById('try-result');
+  const btn = document.getElementById('try-run-btn');
+  if (!prompt) return;
+
   res.style.display = 'block';
-  res.textContent = 'generating...';
+  btn.disabled = true;
+
+  const t0 = Date.now();
+  let elapsed = 0;
+  const timer = setInterval(() => {
+    elapsed = ((Date.now() - t0) / 1000).toFixed(0);
+    res.textContent = `generating… ${elapsed}s`;
+  }, 500);
+
   try {
     const r = await fetch(API + '/api/nemotron/' + model + '/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, max_tokens }),
     });
+    clearInterval(timer);
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error);
-    res.textContent = data.response + '\n\n— ' + data.tokens + ' tokens · ' + data.duration?.toFixed(1) + 's · ' + data.tokens_per_second?.toFixed(1) + ' t/s';
+    if (!r.ok) throw new Error(data.error || JSON.stringify(data));
+    const wall = ((Date.now() - t0) / 1000).toFixed(1);
+    res.textContent = data.response
+      + `\n\n— ${data.tokens} tokens · ${data.duration?.toFixed(1)}s inference · ${data.tokens_per_second?.toFixed(2)} t/s · ${wall}s wall`;
   } catch(e) {
+    clearInterval(timer);
     res.textContent = '✗ ' + e.message;
+  } finally {
+    btn.disabled = false;
   }
 }
 

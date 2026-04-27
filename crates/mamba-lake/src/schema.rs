@@ -81,4 +81,48 @@ CREATE TABLE IF NOT EXISTS agent_registry (
     delivery_to     VARCHAR,
     updated_at      TIMESTAMPTZ NOT NULL
 );
+
+-- ── Solver outcomes (X1: self-learning loop) ──────────────────────────────────
+-- One row per intent the solver evaluated. `decision` is one of:
+--   'executed' | 'skipped' | 'failed'
+-- `predicted_*` come from the pre-flight estimator; `actual_*` are filled in
+-- post-fill from the receipt.
+CREATE TABLE IF NOT EXISTS solver_outcomes (
+    ts                       TIMESTAMPTZ NOT NULL,
+    intent_id                VARCHAR     NOT NULL,
+    protocol                 VARCHAR     NOT NULL,
+    src_chain                UBIGINT     NOT NULL,
+    dst_chain                UBIGINT     NOT NULL,
+    decision                 VARCHAR     NOT NULL,
+    tx_hash                  VARCHAR,
+    predicted_gas            UBIGINT,
+    actual_gas               UBIGINT,
+    effective_gas_price_wei  VARCHAR,
+    predicted_profit_usd     DOUBLE,
+    actual_profit_usd        DOUBLE,
+    skip_reason              VARCHAR,
+    error                    VARCHAR
+);
+CREATE INDEX IF NOT EXISTS idx_outcomes_intent   ON solver_outcomes(intent_id);
+CREATE INDEX IF NOT EXISTS idx_outcomes_ts       ON solver_outcomes(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_outcomes_protocol ON solver_outcomes(protocol);
+CREATE INDEX IF NOT EXISTS idx_outcomes_decision ON solver_outcomes(decision);
+
+-- ── Solver skip-rules (inferred weekly by nemotron) ───────────────────────────
+-- The solver reads `active=true` rows at startup and applies them as filters
+-- before invoking the executor. `rule_json` is a free-form JSON predicate; the
+-- canonical shape is documented in TAIFOON_SOLVER_DELIVERY_SCOPE.md §X1.
+CREATE TABLE IF NOT EXISTS solver_skip_rules (
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    protocol        VARCHAR     NOT NULL,
+    rule_json       TEXT        NOT NULL,
+    description     VARCHAR,
+    confidence      DOUBLE      NOT NULL DEFAULT 0.0,
+    sample_size     UBIGINT     NOT NULL DEFAULT 0,
+    active          BOOLEAN     NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ NOT NULL,
+    superseded_at   TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_skip_rules_active   ON solver_skip_rules(active);
+CREATE INDEX IF NOT EXISTS idx_skip_rules_protocol ON solver_skip_rules(protocol);
 "#;

@@ -63,7 +63,7 @@ impl Lake {
         let mut stmt = conn.prepare(
             "SELECT project, COUNT(*), COALESCE(SUM(tokens_in+tokens_out),0), COALESCE(SUM(cost_usd),0)
              FROM task_envelopes WHERE status='done'
-             GROUP BY project ORDER BY cost_usd DESC"
+             GROUP BY project ORDER BY SUM(cost_usd) DESC"
         )?;
         let rows = stmt.query_map([], |r: &duckdb::Row| {
             Ok(ProjectConsumption {
@@ -84,7 +84,7 @@ impl Lake {
             "SELECT assigned_agent, model, COUNT(*),
                     COALESCE(SUM(tokens_in+tokens_out),0), COALESCE(SUM(cost_usd),0)
              FROM task_envelopes WHERE status='done'
-             GROUP BY assigned_agent, model ORDER BY cost_usd DESC"
+             GROUP BY assigned_agent, model ORDER BY SUM(cost_usd) DESC"
         )?;
         let rows = stmt.query_map([], |r: &duckdb::Row| {
             Ok(AgentConsumption {
@@ -103,13 +103,14 @@ impl Lake {
     pub fn daily_burn_last_30(&self) -> Result<Vec<DailyBurn>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT strftime(completed_at, '%Y-%m-%d') AS day,
+            "SELECT strftime('%Y-%m-%d', completed_at::TIMESTAMP) AS day,
                     COALESCE(SUM(tokens_in+tokens_out),0),
                     COALESCE(SUM(cost_usd),0),
                     COUNT(*)
              FROM task_envelopes
-             WHERE status='done' AND completed_at >= now() - INTERVAL 30 DAYS
-             GROUP BY day ORDER BY day DESC"
+             WHERE status='done' AND completed_at::TIMESTAMP >= now()::TIMESTAMP - INTERVAL 30 DAYS
+             GROUP BY strftime('%Y-%m-%d', completed_at::TIMESTAMP)
+             ORDER BY strftime('%Y-%m-%d', completed_at::TIMESTAMP) DESC"
         )?;
         let rows = stmt.query_map([], |r: &duckdb::Row| {
             Ok(DailyBurn {

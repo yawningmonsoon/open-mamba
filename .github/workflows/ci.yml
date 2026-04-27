@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# CI runs unauthenticated. We deliberately do NOT request any secrets —
+# this repo's contract is "no secret should ever be needed to build".
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: cargo build + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --workspace --bins
+
+      - name: Tests
+        run: cargo test --workspace --all-features
+
+      - name: Clippy (warnings as errors on our crates)
+        run: cargo clippy -p mamba-api -p mamba-bus -p mamba-lake -p mamba-types -- -D warnings

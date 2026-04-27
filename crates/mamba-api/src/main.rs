@@ -1,4 +1,5 @@
 mod routes;
+mod worker;
 
 use anyhow::Result;
 use axum::serve;
@@ -30,6 +31,11 @@ async fn main() -> Result<()> {
     let lake = Lake::open(&db_path)?;
     let bus = Bus::new(lake.clone());
     let nemotron = Arc::new(NemotronClient::with_base(nemotron_base));
+
+    // Spawn the queue worker: polls DuckDB for status=pending tasks and
+    // routes each through the bus. Replaces openfang's cron scheduler
+    // entirely — each task fires exactly once.
+    worker::spawn(lake.clone(), bus.clone());
 
     let app = routes::build(lake, bus, nemotron)
         .layer(CorsLayer::permissive());

@@ -1,0 +1,510 @@
+#!/usr/bin/env bash
+# mamba — control script for the open-mamba autonomous task bus.
+#
+# Subcommands:
+#   up      Refresh AUTH, start openfang + open-mamba, verify dispatch
+#   down    Stop both services
+#   stop    Alias of `down`
+#   status  Show running state, ports, and recent task counts
+#   logs    Tail open-mamba and openfang logs (Ctrl-C to exit)
+#   auth    Re-export ANTHROPIC_AUTH_TOKEN from Claude Code keychain
+#
+# AUTH model:
+#   Claude Code stores its session OAuth token in the macOS keychain under
+#   the service name "Claude Code-credentials". `mamba up` extracts it,
+#   exports ANTHROPIC_AUTH_TOKEN (which the anthropic SDK accepts as a
+#   Bearer token via the OAuth flow), and writes a runtime env file to
+#   ~/.mamba/runtime.env that both daemons load. The token expires;
+#   `mamba auth` refreshes it on demand.
+
+set -euo pipefail
+
+OPEN_MAMBA_ROOT="${OPEN_MAMBA_ROOT:-/Users/mbultra/projects/open-mamba}"
+OPENFANG_ROOT="${OPENFANG_ROOT:-/Users/mbultra/projects/openfang}"
+MAMBA_RUN_DIR="${MAMBA_RUN_DIR:-$HOME/.mamba}"
+MAMBA_PORT="${MAMBA_PORT:-1337}"
+OPENFANG_PORT="${OPENFANG_PORT:-4200}"
+OPENFANG_API_PORT="${OPENFANG_API_PORT:-50051}"
+
+mkdir -p "$MAMBA_RUN_DIR/logs"
+MAMBA_PID_FILE="$MAMBA_RUN_DIR/open-mamba.pid"
+OPENFANG_PID_FILE="$MAMBA_RUN_DIR/openfang.pid"
+MAMBA_LOG="$MAMBA_RUN_DIR/logs/open-mamba.log"
+OPENFANG_LOG="$MAMBA_RUN_DIR/logs/openfang.log"
+RUNTIME_ENV="$MAMBA_RUN_DIR/runtime.env"
+
+# ── ANSI helpers ──────────────────────────────────────────────────────────────
+red()    { printf '\033[31m%s\033[0m\n' "$*"; }
+green()  { printf '\033[32m%s\033[0m\n' "$*"; }
+yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
+blue()   { printf '\033[34m%s\033[0m\n' "$*"; }
+bold()   { printf '\033[1m%s\033[0m\n' "$*"; }
+
+# ── Process helpers ───────────────────────────────────────────────────────────
+is_running() {
+  local pid_file="$1"
+  [[ -f "$pid_file" ]] || return 1
+  local pid; pid="$(cat "$pid_file")"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null
+}
+
+port_owner_pid() {
+  lsof -ti tcp:"$1" -sTCP:LISTEN 2>/dev/null | head -1 || true
+}
+
+# ── OAuth refresh helpers ─────────────────────────────────────────────────────
+# Client ID for the Claude Code / Claude.ai OAuth app. This is a public ID
+# (extracted from the published openclaw + pi-ai implementations) — not a
+# secret. The endpoint expects a JSON body with grant_type=refresh_token.
+ANTHROPIC_OAUTH_CLIENT_ID="9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+ANTHROPIC_OAUTH_TOKEN_URL="https://console.anthropic.com/v1/oauth/token"
+
+# do_oauth_refresh <refresh_token>
+# On success prints three lines: access_token, refresh_token, expires_at_ms.
+# On failure exits non-zero with an error written to stderr.
+do_oauth_refresh() {
+  local rt="$1"
+  # Use curl directly — Python's urllib UA gets blocked by Cloudflare on
+  # console.anthropic.com. curl's default UA passes through.
+  #
+  # Anthropic rate-limits this endpoint aggressively (~3 req/min observed).
+  # Retry on 429 with exponential backoff capped at 3 attempts so a hot
+  # rate limit doesn't hang `mamba up`.
+  local attempt=0 max_attempts=3 wait_s=30
+  while (( attempt < max_attempts )); do
+    attempt=$((attempt + 1))
+    local response status body
+    response="$(curl -sS \
+         --max-time 15 \
+         -X POST "${ANTHROPIC_OAUTH_TOKEN_URL}" \
+         -H "content-type: application/json" \
+         -d "{\"grant_type\":\"refresh_token\",\"client_id\":\"${ANTHROPIC_OAUTH_CLIENT_ID}\",\"refresh_token\":\"${rt}\"}" \
+         -w '\n%{http_code}' 2>&1)"
+    status="$(printf '%s' "$response" | tail -n1)"
+    body="$(printf '%s' "$response" | sed '$d')"
+
+    if [[ "$status" == "200" ]]; then
+      printf '%s' "$body" | python3 -c "
+import sys, json, time
+d = json.load(sys.stdin)
+access  = d.get('access_token')
+refresh = d.get('refresh_token') or '${rt}'
+expires_in = d.get('expires_in')
+if not access or expires_in is None:
+    sys.stderr.write(f'unexpected token response: {d}\n')
+    sys.exit(3)
+expires_at_ms = int(time.time() * 1000) + int(expires_in * 1000) - 5 * 60 * 1000
+print(access)
+print(refresh)
+print(expires_at_ms)
+"
+      return 0
+    fi
+
+    if [[ "$status" == "429" ]] && (( attempt < max_attempts )); then
+      printf '  ! rate-limited (attempt %d/%d) — waiting %ds\n' "$attempt" "$max_attempts" "$wait_s" >&2
+      sleep "$wait_s"
+      wait_s=$((wait_s * 2))
+      continue
+    fi
+
+    printf 'oauth refresh HTTP %s: %s\n' "$status" "$(printf '%s' "$body" | head -c 400)" >&2
+    return 1
+  done
+  return 1
+}
+
+# write_keychain <original_raw_blob> <access> <refresh> <expires_at_ms>
+# Updates ONLY the three OAuth fields, preserves everything else (scopes,
+# subscriptionType, etc.) so we don't accidentally drop fields Claude Code
+# relies on. Uses `security add-generic-password -U` to update in place.
+write_keychain() {
+  local original="$1"
+  local new_access="$2"
+  local new_refresh="$3"
+  local new_expires="$4"
+  local updated
+  updated="$(printf '%s' "$original" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+oa = d.get('claudeAiOauth', {})
+oa['accessToken']  = '$new_access'
+oa['refreshToken'] = '$new_refresh'
+oa['expiresAt']    = $new_expires
+d['claudeAiOauth'] = oa
+print(json.dumps(d))
+" 2>/dev/null)"
+  if [[ -z "$updated" ]]; then
+    yellow "  ! Could not splice new tokens into keychain blob (skipping write)"
+    return 1
+  fi
+  # -U updates an existing entry; -s = service name; -w = password value.
+  if security add-generic-password -U \
+       -a "$USER" \
+       -s 'Claude Code-credentials' \
+       -w "$updated" \
+       2>/dev/null; then
+    green "  ✓ Keychain entry updated"
+    return 0
+  else
+    yellow "  ! Could not write to keychain (refresh still good for this session)"
+    return 1
+  fi
+}
+
+# ── AUTH refresh from Claude Code keychain ────────────────────────────────────
+#
+# The keychain entry "Claude Code-credentials" stores a JSON blob of shape:
+#   { "claudeAiOauth": { "accessToken", "refreshToken", "expiresAt", ... } }
+#
+# `refresh_auth` reads this blob. If the access token is fresh, it's used as-is.
+# If expired, it's exchanged for a new one via Anthropic's OAuth refresh
+# endpoint and the keychain is updated in place.
+refresh_auth() {
+  bold "→ Refreshing ANTHROPIC_AUTH_TOKEN from macOS keychain"
+
+  local raw
+  if ! raw="$(security find-generic-password -s 'Claude Code-credentials' -w 2>/dev/null)"; then
+    red "  ✗ Could not read 'Claude Code-credentials' from keychain."
+    red "    Sign in to Claude Code first (claude /login), then re-run."
+    return 1
+  fi
+
+  local parse_out
+  parse_out="$(printf '%s' "$raw" | python3 -c '
+import sys, json
+d = json.load(sys.stdin)["claudeAiOauth"]
+print(d.get("accessToken", ""))
+print(d.get("refreshToken", ""))
+print(d.get("expiresAt", 0))
+print(",".join(d.get("scopes", [])))
+' 2>/dev/null)"
+  local token refresh_token expires_at scopes
+  token="$(printf '%s\n' "$parse_out" | sed -n '1p')"
+  refresh_token="$(printf '%s\n' "$parse_out" | sed -n '2p')"
+  expires_at="$(printf '%s\n' "$parse_out" | sed -n '3p')"
+  scopes="$(printf '%s\n' "$parse_out" | sed -n '4p')"
+
+  if [[ -z "$token" ]]; then
+    red "  ✗ Keychain entry exists but accessToken missing or unparseable."
+    return 1
+  fi
+
+  local now_ms; now_ms=$(($(date +%s) * 1000))
+  local stale=0
+  if (( expires_at > 0 && expires_at < now_ms )); then
+    stale=1
+    yellow "  ! Access token expired at epoch_ms=$expires_at (now=$now_ms)."
+
+    if [[ -n "$refresh_token" ]]; then
+      bold  "  → Attempting silent refresh via Anthropic OAuth endpoint"
+      local refresh_out
+      if refresh_out="$(do_oauth_refresh "$refresh_token")"; then
+        token="$(printf '%s\n' "$refresh_out" | sed -n '1p')"
+        local new_refresh new_expires
+        new_refresh="$(printf '%s\n' "$refresh_out" | sed -n '2p')"
+        new_expires="$(printf '%s\n' "$refresh_out" | sed -n '3p')"
+        write_keychain "$raw" "$token" "$new_refresh" "$new_expires" || true
+        expires_at="$new_expires"
+        stale=0
+        green "  ✓ Token refreshed via OAuth (new expires_at=$new_expires)"
+      else
+        yellow "  ! Refresh failed. Run 'claude /login' to re-authenticate."
+        yellow "    (Continuing with stale token — services start, dispatch will 401.)"
+      fi
+    else
+      yellow "    No refresh token in keychain — must re-login via 'claude /login'."
+    fi
+  fi
+
+  # Persist for child daemons. We export both names because:
+  #   - ANTHROPIC_AUTH_TOKEN is the OAuth/Bearer convention
+  #   - ANTHROPIC_API_KEY is what openfang's current driver reads (compat shim)
+  # The openfang anthropic driver patch (separate task) makes this clean.
+  umask 077
+  cat > "$RUNTIME_ENV" <<EOF
+# auto-generated by mamba up at $(date -u +%Y-%m-%dT%H:%M:%SZ)
+export ANTHROPIC_AUTH_TOKEN="$token"
+export ANTHROPIC_API_KEY="$token"
+export OPENFANG_URL="http://127.0.0.1:${OPENFANG_PORT}"
+export NEMOTRON_BASE_URL="https://scanner.taifoon.dev/api/intel"
+export PORT="$MAMBA_PORT"
+export RUST_LOG="\${RUST_LOG:-info}"
+EOF
+
+  if (( stale )); then
+    yellow "  ~ Wrote stale token to $RUNTIME_ENV (services will start, dispatch may fail)"
+  else
+    green "  ✓ Token fresh. scopes=$scopes  expires_at=$expires_at"
+    green "    Wrote $RUNTIME_ENV"
+  fi
+}
+
+# ── Subcommands ───────────────────────────────────────────────────────────────
+cmd_up() {
+  refresh_auth || yellow "  (continuing despite auth issues — services will start, fix dispatch later)"
+  # shellcheck disable=SC1090
+  source "$RUNTIME_ENV"
+
+  bold "→ Building binaries (incremental)"
+  if [[ ! -x "$OPENFANG_ROOT/target/release/openfang" ]]; then
+    yellow "  ! openfang release binary missing — building (may take minutes)"
+    (cd "$OPENFANG_ROOT" && cargo build --release --bin openfang) >>"$OPENFANG_LOG" 2>&1
+  fi
+  if [[ ! -x "$OPEN_MAMBA_ROOT/target/debug/open-mamba" ]]; then
+    yellow "  ! open-mamba binary missing — building"
+    (cd "$OPEN_MAMBA_ROOT" && cargo build --bin open-mamba) >>"$MAMBA_LOG" 2>&1
+  fi
+
+  bold "→ Starting openfang daemon"
+  if is_running "$OPENFANG_PID_FILE"; then
+    yellow "  ! already running (pid=$(cat "$OPENFANG_PID_FILE"))"
+  else
+    local existing_of; existing_of="$(port_owner_pid "$OPENFANG_PORT" || true)"
+    if [[ -n "$existing_of" ]]; then
+      yellow "  ! port $OPENFANG_PORT held by pid $existing_of (adopting)"
+      echo "$existing_of" > "$OPENFANG_PID_FILE"
+    else
+      # Forward PATH + HOME + USER so openfang and any subprocess (notably
+      # the `claude` CLI used by the claude-code driver) work normally.
+      #
+      # We DELIBERATELY DO NOT export ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY
+      # when going through claude-code: the Claude CLI prefers env-var keys
+      # over its own keychain session, so a stale env key causes 401 even
+      # when `claude /login` is healthy. The CLI manages its own auth.
+      nohup env -i \
+        "PATH=$PATH" \
+        "HOME=$HOME" \
+        "USER=$USER" \
+        "RUST_LOG=${RUST_LOG:-info}" \
+        "$OPENFANG_ROOT/target/release/openfang" start >>"$OPENFANG_LOG" 2>&1 &
+      echo $! > "$OPENFANG_PID_FILE"
+      sleep 3
+      # Re-discover the actual listening pid (nohup pid may differ from final daemon pid)
+      local real; real="$(port_owner_pid "$OPENFANG_PORT" || true)"
+      [[ -n "$real" ]] && echo "$real" > "$OPENFANG_PID_FILE"
+      green "  ✓ openfang pid=$(cat "$OPENFANG_PID_FILE")"
+    fi
+  fi
+
+  bold "→ Starting open-mamba server"
+  if is_running "$MAMBA_PID_FILE"; then
+    yellow "  ! already running (pid=$(cat "$MAMBA_PID_FILE"))"
+  else
+    local existing_om; existing_om="$(port_owner_pid "$MAMBA_PORT" || true)"
+    if [[ -n "$existing_om" ]]; then
+      yellow "  ! port $MAMBA_PORT held by pid $existing_om (adopting)"
+      echo "$existing_om" > "$MAMBA_PID_FILE"
+    else
+      cd "$OPEN_MAMBA_ROOT"
+      nohup env "ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-}" "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
+        "OPENFANG_URL=$OPENFANG_URL" "NEMOTRON_BASE_URL=$NEMOTRON_BASE_URL" "PORT=$MAMBA_PORT" \
+        "MAMBA_DB_PATH=$OPEN_MAMBA_ROOT/data/mamba.duckdb" \
+        "RUST_LOG=${RUST_LOG:-info}" \
+        "$OPEN_MAMBA_ROOT/target/debug/open-mamba" >>"$MAMBA_LOG" 2>&1 &
+      echo $! > "$MAMBA_PID_FILE"
+      cd - >/dev/null
+      sleep 3
+      local real_om; real_om="$(port_owner_pid "$MAMBA_PORT" || true)"
+      [[ -n "$real_om" ]] && echo "$real_om" > "$MAMBA_PID_FILE"
+      green "  ✓ open-mamba pid=$(cat "$MAMBA_PID_FILE")"
+    fi
+  fi
+
+  cmd_register_agents
+  cmd_status
+  echo
+  bold "→ Smoke-testing dispatch"
+  smoke_test
+}
+
+cmd_down() {
+  bold "→ Stopping services"
+  for pf in "$MAMBA_PID_FILE" "$OPENFANG_PID_FILE"; do
+    if [[ -f "$pf" ]]; then
+      local pid; pid="$(cat "$pf")"
+      if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null && green "  ✓ killed pid=$pid ($(basename "$pf" .pid))"
+        sleep 1
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+      rm -f "$pf"
+    fi
+  done
+}
+
+cmd_status() {
+  bold "→ Status"
+  local mp op
+  if is_running "$MAMBA_PID_FILE"; then
+    mp="$(cat "$MAMBA_PID_FILE")"
+    green   "  open-mamba   ✓ running pid=$mp port=$MAMBA_PORT"
+  else
+    red     "  open-mamba   ✗ down"
+  fi
+  if is_running "$OPENFANG_PID_FILE"; then
+    op="$(cat "$OPENFANG_PID_FILE")"
+    green   "  openfang     ✓ running pid=$op port=$OPENFANG_PORT"
+  else
+    red     "  openfang     ✗ down"
+  fi
+
+  if curl -sf "http://localhost:$MAMBA_PORT/health" >/dev/null 2>&1; then
+    green "  /health      ✓ open-mamba responding"
+    local counts
+    counts="$(curl -sf "http://localhost:$MAMBA_PORT/api/tasks?limit=1000" | python3 -c '
+import sys, json, collections
+ts = json.load(sys.stdin)
+c = collections.Counter(t["status"] for t in ts)
+parts = [f"{k}={v}" for k,v in sorted(c.items())]
+print(" ".join(parts) if parts else "(empty)")
+' 2>/dev/null || echo "?")"
+    blue   "  tasks        $counts"
+    # show last few completions with cost
+    local recent
+    recent="$(curl -sf "http://localhost:$MAMBA_PORT/api/tasks?status=done&limit=3" 2>/dev/null | python3 -c '
+import sys, json
+ts = json.load(sys.stdin)
+for t in ts[:3]:
+    cost = t.get("cost_usd") or 0
+    out = t.get("tokens_out") or 0
+    pid = t.get("id","?")[:8]
+    pj = t.get("project","?")[:18]
+    print(f"    ✓ {pid} ({pj}) — out={out} cost=${cost:.4f}")
+' 2>/dev/null)"
+    [[ -n "$recent" ]] && printf '%s\n' "$recent"
+  else
+    yellow "  /health      ✗ open-mamba not yet responding"
+  fi
+
+  # openfang doesn't expose /health — probe /api/agents which always responds.
+  local agent_count
+  agent_count="$(curl -sf "http://localhost:$OPENFANG_PORT/api/agents" 2>/dev/null \
+    | python3 -c 'import sys,json; print(len(json.load(sys.stdin)))' 2>/dev/null || echo "?")"
+  if [[ "$agent_count" != "?" ]]; then
+    green "  openfang API ✓ /api/agents responding (agents=$agent_count)"
+    # Cross-check that the agent slugs mamba routes to actually exist
+    local missing=""
+    for slug in coder code-reviewer taifoon-intel; do
+      if ! curl -sf "http://localhost:$OPENFANG_PORT/api/agents" \
+          | python3 -c "import sys,json; n='$slug'; assert any(a.get('name')==n for a in json.load(sys.stdin))" 2>/dev/null; then
+        missing+=" $slug"
+      fi
+    done
+    if [[ -n "$missing" ]]; then
+      yellow "  openfang     ! missing agents:$missing  (run: mamba register-agents)"
+    fi
+  else
+    yellow "  openfang API ✗ /api/agents not responding"
+  fi
+}
+
+cmd_logs() {
+  bold "→ Tailing logs (Ctrl-C to exit)"
+  ls "$MAMBA_LOG" "$OPENFANG_LOG" 2>/dev/null || true
+  exec tail -F "$MAMBA_LOG" "$OPENFANG_LOG" 2>/dev/null
+}
+
+smoke_test() {
+  local id status
+  id="$(curl -fsS -X POST "http://localhost:$MAMBA_PORT/ingest" \
+    -H 'content-type: application/json' \
+    -d '{"project":"mamba-up-smoke","assigned_agent":"coder","skill":"simplify","model":"claude-opus-4-7","payload":"PING - mamba up smoke test - reply with 'pong' only","priority":1,"source":"claude_opus"}' \
+    | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))' 2>/dev/null)"
+  if [[ -z "$id" ]]; then
+    red "  ✗ /ingest failed"
+    return 1
+  fi
+  echo "  task id=$id  (waiting up to 8s for dispatch...)"
+  for _ in 1 2 3 4 5 6 7 8; do
+    sleep 1
+    status="$(curl -fsS "http://localhost:$MAMBA_PORT/api/tasks/$id" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("status",""))' 2>/dev/null)"
+    if [[ "$status" == "dispatched" || "$status" == "running" || "$status" == "done" ]]; then
+      green "  ✓ dispatched: status=$status"
+      return 0
+    fi
+  done
+  yellow "  ! still status=$status after 8s — check 'mamba logs' (often: openfang missing agent slug or auth)"
+  return 0
+}
+
+# ── Entrypoint ────────────────────────────────────────────────────────────────
+cmd_retry_pending() {
+  bold "→ Retrying pending tasks"
+  local resp
+  if ! resp="$(curl -fsS -X POST "http://localhost:$MAMBA_PORT/api/tasks/retry-pending" 2>&1)"; then
+    red "  ✗ retry-pending request failed: $resp"
+    return 1
+  fi
+  local count
+  count="$(printf '%s' "$resp" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("redispatched",0))' 2>/dev/null || echo 0)"
+  if [[ "$count" -gt 0 ]]; then
+    green "  ✓ redispatched $count task(s)"
+  else
+    yellow "  ~ nothing to retry (no pending tasks, or all tasks already in flight)"
+  fi
+}
+
+cmd_retry_one() {
+  local id="$1"
+  if [[ -z "$id" ]]; then
+    red "  ✗ usage: mamba retry <task-id>"
+    return 1
+  fi
+  bold "→ Retrying task $id"
+  local resp
+  resp="$(curl -fsS -X POST "http://localhost:$MAMBA_PORT/api/tasks/$id/retry" 2>&1)"
+  green "  $resp"
+}
+
+cmd_register_agents() {
+  bold "→ Registering agents in openfang"
+  local manifest_dir="$OPEN_MAMBA_ROOT/agents/openfang-manifests"
+  for f in "$manifest_dir"/*.toml; do
+    local name; name="$(basename "$f" .toml)"
+    if curl -sf "http://localhost:$OPENFANG_PORT/api/agents" \
+        | python3 -c "import sys,json; n='$name'; sys.exit(0 if any(a.get('name')==n for a in json.load(sys.stdin)) else 1)" 2>/dev/null; then
+      green "  ✓ $name already registered"
+      continue
+    fi
+    if "$OPENFANG_ROOT/target/release/openfang" agent spawn "$f" >/dev/null 2>&1; then
+      green "  ✓ $name spawned"
+    else
+      red   "  ✗ $name spawn failed (check ~/.openfang/tui.log)"
+    fi
+  done
+}
+
+cmd_help() {
+  cat <<USAGE
+Usage: mamba <command>
+
+Commands:
+  up               Refresh AUTH, start openfang + open-mamba, smoke-test
+  down             Stop both services (alias: stop)
+  status           Show running state and task counts
+  logs             Tail logs from both daemons
+  auth             Re-pull OAuth token from keychain (auto-refreshes if expired)
+  refresh          Alias for auth
+  register-agents  Spawn missing agents from agents/openfang-manifests/*.toml
+  retry-pending    Re-dispatch every task currently in 'pending' status
+  retry <id>       Re-dispatch a single task by id
+USAGE
+}
+
+case "${1:-status}" in
+  up)               cmd_up ;;
+  down|stop)        cmd_down ;;
+  status)           cmd_status ;;
+  logs)             cmd_logs ;;
+  auth|refresh)     refresh_auth ;;
+  register-agents)  cmd_register_agents ;;
+  retry-pending)    cmd_retry_pending ;;
+  retry)            cmd_retry_one "${2:-}" ;;
+  help|-h|--help)   cmd_help ;;
+  *)
+    red "unknown command: ${1:-}"
+    cmd_help
+    exit 1
+    ;;
+esac
