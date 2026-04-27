@@ -457,6 +457,62 @@ cmd_retry_one() {
   green "  $resp"
 }
 
+cmd_git_init() {
+  bold "→ Aligning git committer with active gh account in $PWD"
+  if ! command -v gh >/dev/null 2>&1; then
+    red "  ✗ gh CLI not installed (brew install gh)"
+    return 1
+  fi
+  local login; login="$(gh api user --jq .login 2>/dev/null || true)"
+  if [[ -z "$login" ]]; then
+    red "  ✗ not logged into gh — run: gh auth login"
+    return 1
+  fi
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    red "  ✗ $PWD is not a git repository"
+    return 1
+  fi
+  local id; id="$(gh api users/"$login" --jq .id 2>/dev/null || echo)"
+  local email
+  if [[ -n "$id" ]]; then
+    email="${id}+${login}@users.noreply.github.com"
+  else
+    email="${login}@users.noreply.github.com"
+  fi
+  git config user.name  "$login"
+  git config user.email "$email"
+  green "  ✓ user.name=$login"
+  green "  ✓ user.email=$email"
+  if gh auth setup-git >/dev/null 2>&1; then
+    green "  ✓ gh-as-credential-helper configured"
+  else
+    yellow "  ! gh auth setup-git failed (push will still work if remote uses ssh)"
+  fi
+}
+
+cmd_whoami() {
+  bold "→ Identity"
+  local active; active="$(gh auth status 2>/dev/null | awk '/Active account: true/{print prev} {prev=$0}' | grep -o 'account [^ ]*' | awk '{print $2}')"
+  [[ -z "$active" ]] && active="(not logged in — run: gh auth login)"
+  green "  active gh account:  $active"
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    local n e
+    n="$(git config user.name  || echo '(unset)')"
+    e="$(git config user.email || echo '(unset)')"
+    green "  git user.name:      $n"
+    green "  git user.email:     $e"
+    blue  "  remote(s):"
+    git remote -v 2>/dev/null | sed 's/^/    /' || echo "    (no remotes)"
+    if [[ "$n" == "$active" ]]; then
+      green "  ✓ committer matches active gh — pushes will look consistent"
+    else
+      yellow "  ! committer drift — run 'mamba git-init' to align"
+    fi
+  else
+    yellow "  (not in a git repo — cd into one to see committer)"
+  fi
+}
+
 cmd_register_agents() {
   bold "→ Registering agents in openfang"
   local manifest_dir="$OPEN_MAMBA_ROOT/agents/openfang-manifests"
@@ -489,6 +545,8 @@ Commands:
   register-agents  Spawn missing agents from agents/openfang-manifests/*.toml
   retry-pending    Re-dispatch every task currently in 'pending' status
   retry <id>       Re-dispatch a single task by id
+  git-init         Align git committer in \$PWD with active gh account
+  whoami           Show active gh account + git committer in \$PWD
 USAGE
 }
 
@@ -501,6 +559,8 @@ case "${1:-status}" in
   register-agents)  cmd_register_agents ;;
   retry-pending)    cmd_retry_pending ;;
   retry)            cmd_retry_one "${2:-}" ;;
+  git-init)         cmd_git_init ;;
+  whoami)           cmd_whoami ;;
   help|-h|--help)   cmd_help ;;
   *)
     red "unknown command: ${1:-}"

@@ -119,33 +119,34 @@ If you'd rather use a real API key (skips Claude Code entirely):
 
 ---
 
-## How GitHub auth flows to agents
+## GitHub identity for agents
 
-When a Claude task does git work (commits, PRs), it inherits your
-machine's `gh` setup automatically:
-
-- `gh auth login` stores a token in the macOS keychain.
-- `gh auth setup-git` configures git to use that token as a credential
-  helper for HTTPS pushes to `github.com`.
-- The `claude` CLI inherits both — so when an agent runs `git push` or
-  `gh pr create`, it authenticates as **your active gh account**.
-
-**Important:** the *commit author* (`user.name` / `user.email` in your
-local git config) is independent of the *push identity* (the gh token).
-You can commit as `MaciejBaj <maciej@t3rn.io>` and still push as
-`yawningmonsoon` — that's how the spinner repo works today.
-
-To verify the identity an agent will use:
+Tasks that do git work (commits, PRs, pushes) inherit the machine's
+existing `gh` + git config. To keep the *commit author* and the *push
+identity* aligned with whatever account `gh auth login` is using, run:
 
 ```bash
-gh auth status                           # which user pushes get attributed to
-git -C ~/projects/your-repo config user.name   # which name commits get
-git -C ~/projects/your-repo remote -v          # which remote (HTTPS vs SSH)
+mamba git-init                # in any repo where an agent will commit
 ```
 
-If `gh auth` and the active git committer disagree (yours probably do)
-that's fine — push goes via gh, commit metadata is the local user. Agents
-just inherit both layers.
+That wrapper:
+
+1. Reads the active gh login (`gh api user --jq .login`).
+2. Sets `git config user.name` and `user.email` to the gh-provided
+   identity (`<login>@users.noreply.github.com` — GitHub's privacy
+   forwarder, never reveals a real address).
+3. Runs `gh auth setup-git` so HTTPS pushes use the gh-stored token
+   as the credential helper.
+
+After that, any agent (or you) who commits in that repo signs as the
+same account that pushes — no split identity, nothing personal in the
+log.
+
+To inspect what an agent will commit as:
+
+```bash
+mamba whoami      # active gh login + configured git committer in $PWD
+```
 
 ---
 

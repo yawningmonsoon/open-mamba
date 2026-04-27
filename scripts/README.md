@@ -101,9 +101,32 @@ curl -X POST http://localhost:1337/ingest \
 
 mamba returns `{"id": "<uuid>"}`. Track with `GET /api/tasks/<id>`.
 
+## Solver self-learning loop (X1)
+
+`solver_skip_rules_weekly.py` is the brain of the autonomous loop. It pulls
+solver outcomes from `/api/solver/outcomes`, asks `nemotron/taifoon` to
+synthesize JSON skip-rules, validates them, and POSTs the active set to
+`/api/solver/skip-rules`. The taifoon-solver picks them up at next restart.
+
+```bash
+# manual run (idempotent)
+MAMBA_URL=http://localhost:1337 ./scripts/solver_skip_rules_weekly.py
+
+# weekly cron entry — Mondays 03:00 local time
+0 3 * * 1 cd /Users/mbultra/projects/open-mamba && \
+  MAMBA_URL=http://localhost:1337 \
+  ./scripts/solver_skip_rules_weekly.py \
+  >> ~/.mamba/logs/skip-rules.log 2>&1
+```
+
+Underfit guard: protocols with fewer than `MIN_SAMPLES_PER_PROTOCOL` (default
+50) outcome rows get an EMPTY rule set published — better no rule than a
+noisy one. Override with `MIN_SAMPLES_PER_PROTOCOL=100` etc.
+
 ## Files
 
 - `scripts/mamba` — this script (symlinked to `/opt/homebrew/bin/mamba`)
+- `scripts/solver_skip_rules_weekly.py` — X1 weekly skip-rule synthesizer
 - `~/.mamba/runtime.env` — auth env loaded by both daemons
 - `~/.mamba/logs/open-mamba.log` — mamba server log
 - `~/.mamba/logs/openfang.log` — openfang daemon log
