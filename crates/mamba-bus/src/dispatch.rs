@@ -31,12 +31,10 @@ impl Bus {
         }
     }
 
-    /// Accept a new TaskEnvelope, persist it, then dispatch asynchronously.
-    pub async fn submit(&self, mut envelope: TaskEnvelope) -> Result<()> {
+    pub async fn submit(&self, envelope: TaskEnvelope) -> Result<()> {
         self.lake.insert_envelope(&envelope)?;
         info!(id = %envelope.id, project = %envelope.project, agent = %envelope.assigned_agent, "bus: submitted");
 
-        // Dispatch in background — don't block the HTTP response
         let bus = self.clone();
         let env_id = envelope.id;
         tokio::spawn(async move {
@@ -61,23 +59,13 @@ impl Bus {
 
         let system = Some("You are a Taifoon autonomous agent. Be concise and precise.");
         let resp = self.nemotron.generate(adapter, &envelope.payload, system, Some(512)).await?;
+        let tokens_out = resp.tokens as i64;
+        let cost_usd = estimate_cost_usd(0, tokens_out, adapter.slug());
 
         info!(id = %envelope.id, tokens = resp.tokens, "nemotron done");
 
-        self.lake.complete_envelope(
-            envelope.id,
-            0,
-            resp.tokens as i64,
-            estimate_cost_usd(0, resp.tokens as i64, adapter.slug()),
-            None,
-        )?;
-
-        self.billing.process(
-            &envelope,
-            0,
-            resp.tokens as i64,
-            estimate_cost_usd(0, resp.tokens as i64, adapter.slug()),
-        ).await?;
+        self.lake.complete_envelope(envelope.id, 0, tokens_out, cost_usd, None)?;
+        self.billing.process(&envelope, 0, tokens_out, cost_usd).await?;
 
         Ok(())
     }
@@ -92,11 +80,9 @@ impl Bus {
     }
 }
 
-/// Rough cost estimate. Nemotron is on-prem GPU so cost = 0 for tokens.
-/// Cloud models use standard pricing.
 fn estimate_cost_usd(tokens_in: i64, tokens_out: i64, model: &str) -> f64 {
-    if model.starts_with("nemotron") || model.starts_with("taifoon") || model.starts_with("polymarket") || model.starts_with("algotrada") {
-        return 0.0; // on-prem GPU — $0
+    if NemotronAdapter::from_model_str(model).is_some() {
+        return 0.0;
     }
     // claude-sonnet-4-6: $3/M in, $15/M out
     let (in_rate, out_rate) = if model.contains("sonnet") {

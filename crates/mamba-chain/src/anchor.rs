@@ -8,7 +8,6 @@
 
 use anyhow::Result;
 use mamba_types::billing::BillingEvent;
-use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
 pub struct ChainAnchor {
@@ -37,18 +36,11 @@ impl ChainAnchor {
         let task_bytes = event.task_id.as_bytes();
         let hash_bytes = hex::decode(&event.payload_hash).unwrap_or_default();
 
+        // hash is always 32 bytes: Encryptor::hash() returns hex(sha256) → 64 chars → 32 decoded bytes
         let mut data = Vec::with_capacity(4 + 16 + 32);
         data.extend_from_slice(&selector);
         data.extend_from_slice(task_bytes);
-        let padded_hash = if hash_bytes.len() == 32 {
-            hash_bytes
-        } else {
-            let mut h = vec![0u8; 32];
-            let n = hash_bytes.len().min(32);
-            h[..n].copy_from_slice(&hash_bytes[..n]);
-            h
-        };
-        data.extend_from_slice(&padded_hash);
+        data.extend_from_slice(&hash_bytes);
         data
     }
 
@@ -76,10 +68,7 @@ impl ChainAnchor {
             "anchoring billing event on-chain"
         );
 
-        // alloy provider + sign + send
-        // Stubbed here — wired in mamba-api/src/billing_worker.rs where
-        // we have the full alloy wallet context.
-        // Returns dummy hash until wired.
+        // TODO: wire alloy provider + sign + send; returns calldata preview until then
         Ok(Some(format!("0x{}", hex::encode(&calldata[..32.min(calldata.len())]))))
     }
 }

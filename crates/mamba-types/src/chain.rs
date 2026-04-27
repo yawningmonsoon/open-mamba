@@ -18,10 +18,17 @@ pub struct ChainLog {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChainLogKind {
-    /// Task billing event anchored on-chain
     BillingAnchor,
-    /// Agent run completion event
     AgentRunCompletion,
-    /// Encrypted audit log pointer
     AuditPointer,
+}
+
+impl ChainLogKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::BillingAnchor => "billing_anchor",
+            Self::AgentRunCompletion => "agent_run_completion",
+            Self::AuditPointer => "audit_pointer",
+        }
+    }
 }

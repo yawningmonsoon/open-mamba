@@ -6,15 +6,17 @@ use mamba_types::{
     chain::ChainLog,
     envelope::{TaskEnvelope, TaskStatus},
 };
+
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tracing::info;
 use uuid::Uuid;
 
 /// Thread-safe DuckDB data lake.
+/// Uses blocking Mutex: DuckDB Connection is not Send+Sync natively.
 #[derive(Clone)]
 pub struct Lake {
-    pub conn: Arc<Mutex<Connection>>,
+    pub(crate) conn: Arc<Mutex<Connection>>,
 }
 
 impl Lake {
@@ -40,13 +42,13 @@ impl Lake {
             duckdb::params![
                 e.id.to_string(),
                 e.project,
-                serde_json::to_string(&e.source)?,
+                e.source.as_str(),
                 e.assigned_agent,
                 e.skill,
                 e.model,
                 e.payload,
                 e.priority,
-                serde_json::to_string(&e.status)?,
+                e.status.as_str(),
                 e.openfang_job_id.map(|u| u.to_string()),
                 e.tokens_in,
                 e.tokens_out,
@@ -67,7 +69,7 @@ impl Lake {
             "UPDATE task_envelopes SET status=?, openfang_job_id=?, dispatched_at=now()
              WHERE id=?",
             duckdb::params![
-                serde_json::to_string(&status)?,
+                status.as_str(),
                 openfang_job_id.map(|u| u.to_string()),
                 id.to_string(),
             ],
@@ -148,7 +150,7 @@ impl Lake {
             "INSERT INTO chain_logs VALUES (?,?,?,?,?,?,?,?,?)",
             duckdb::params![
                 log.id.to_string(),
-                serde_json::to_string(&log.kind)?,
+                log.kind.as_str(),
                 log.task_id.map(|u| u.to_string()),
                 log.payload_hash,
                 log.tx_hash,

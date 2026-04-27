@@ -19,8 +19,12 @@ CREATE TABLE IF NOT EXISTS task_envelopes (
     chain_tx        VARCHAR,
     created_at      TIMESTAMPTZ NOT NULL,
     dispatched_at   TIMESTAMPTZ,
-    completed_at    TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ
 );
+CREATE INDEX IF NOT EXISTS idx_te_status     ON task_envelopes(status);
+CREATE INDEX IF NOT EXISTS idx_te_project    ON task_envelopes(project);
+CREATE INDEX IF NOT EXISTS idx_te_agent      ON task_envelopes(assigned_agent);
+CREATE INDEX IF NOT EXISTS idx_te_completed  ON task_envelopes(completed_at DESC);
 
 -- ── Billing records ───────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS billing_records (
@@ -35,7 +39,7 @@ CREATE TABLE IF NOT EXISTS billing_records (
     encrypted_log   TEXT        NOT NULL,
     chain_tx        VARCHAR,
     chain_block     UBIGINT,
-    created_at      TIMESTAMPTZ NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL
 );
 
 -- ── On-chain log ──────────────────────────────────────────────────────────────
@@ -48,7 +52,7 @@ CREATE TABLE IF NOT EXISTS chain_logs (
     block_number    UBIGINT,
     chain_id        UBIGINT     NOT NULL,
     submitted_at    TIMESTAMPTZ NOT NULL,
-    confirmed_at    TIMESTAMPTZ,
+    confirmed_at    TIMESTAMPTZ
 );
 
 -- ── Token consumption rollup (Mamba-SSM state snapshots) ─────────────────────
@@ -62,7 +66,7 @@ CREATE TABLE IF NOT EXISTS token_snapshots (
     tokens_in       BIGINT      NOT NULL DEFAULT 0,
     tokens_out      BIGINT      NOT NULL DEFAULT 0,
     cost_usd        DOUBLE      NOT NULL DEFAULT 0,
-    task_count      BIGINT      NOT NULL DEFAULT 0,
+    task_count      BIGINT      NOT NULL DEFAULT 0
 );
 
 -- ── Agent registry mirror ─────────────────────────────────────────────────────
@@ -75,6 +79,6 @@ CREATE TABLE IF NOT EXISTS agent_registry (
     skills          JSON,
     delivery_channel VARCHAR,
     delivery_to     VARCHAR,
-    updated_at      TIMESTAMPTZ NOT NULL,
+    updated_at      TIMESTAMPTZ NOT NULL
 );
 "#;

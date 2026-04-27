@@ -46,7 +46,7 @@ impl Lake {
                     COALESCE(SUM(tokens_in)+SUM(tokens_out),0), COALESCE(SUM(cost_usd),0)
              FROM task_envelopes WHERE status='done'"
         )?;
-        let row = stmt.query_row([], |r| {
+        let row = stmt.query_row([], |r: &duckdb::Row| {
             Ok(GlobalConsumption {
                 total_tasks: r.get(0)?,
                 total_tokens_in: r.get(1)?,
@@ -65,7 +65,7 @@ impl Lake {
              FROM task_envelopes WHERE status='done'
              GROUP BY project ORDER BY cost_usd DESC"
         )?;
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map([], |r: &duckdb::Row| {
             Ok(ProjectConsumption {
                 project: r.get(0)?,
                 tasks: r.get(1)?,
@@ -73,7 +73,7 @@ impl Lake {
                 cost_usd: r.get(3)?,
             })
         })?
-        .filter_map(|r| r.ok())
+        .filter_map(Result::ok)
         .collect();
         Ok(rows)
     }
@@ -86,7 +86,7 @@ impl Lake {
              FROM task_envelopes WHERE status='done'
              GROUP BY assigned_agent, model ORDER BY cost_usd DESC"
         )?;
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map([], |r: &duckdb::Row| {
             Ok(AgentConsumption {
                 agent_slug: r.get(0)?,
                 model: r.get(1)?,
@@ -95,7 +95,7 @@ impl Lake {
                 cost_usd: r.get(4)?,
             })
         })?
-        .filter_map(|r| r.ok())
+        .filter_map(Result::ok)
         .collect();
         Ok(rows)
     }
@@ -111,7 +111,7 @@ impl Lake {
              WHERE status='done' AND completed_at >= now() - INTERVAL 30 DAYS
              GROUP BY day ORDER BY day DESC"
         )?;
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map([], |r: &duckdb::Row| {
             Ok(DailyBurn {
                 day: r.get(0)?,
                 tokens: r.get(1)?,
@@ -119,7 +119,7 @@ impl Lake {
                 tasks: r.get(3)?,
             })
         })?
-        .filter_map(|r| r.ok())
+        .filter_map(Result::ok)
         .collect();
         Ok(rows)
     }

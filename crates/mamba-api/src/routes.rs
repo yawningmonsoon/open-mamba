@@ -7,9 +7,9 @@ use axum::{
 };
 use mamba_bus::Bus;
 use mamba_lake::Lake;
-use mamba_nemotron::NemotronClient;
+use mamba_nemotron::{NemotronAdapter, NemotronClient};
 use mamba_types::envelope::{TaskEnvelope, TaskSource};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -20,14 +20,8 @@ pub struct AppState {
     pub nemotron: Arc<NemotronClient>,
 }
 
-pub fn build(lake: Lake, bus: Bus) -> Router {
-    let nemotron_base = std::env::var("NEMOTRON_BASE_URL")
-        .unwrap_or_else(|_| "https://scanner.taifoon.dev/api/intel".to_string());
-    let state = AppState {
-        lake: lake.clone(),
-        bus,
-        nemotron: Arc::new(NemotronClient::with_base(nemotron_base)),
-    };
+pub fn build(lake: Lake, bus: Bus, nemotron: Arc<NemotronClient>) -> Router {
+    let state = AppState { lake: lake.clone(), bus, nemotron };
 
     Router::new()
         // ── UI ─────────────────────────────────────────────────────────────
@@ -73,29 +67,19 @@ pub struct IngestRequest {
     pub model: Option<String>,
     pub payload: String,
     pub priority: Option<u8>,
-    pub source: Option<String>,
+    #[serde(default)]
+    pub source: TaskSource,
 }
 
 async fn ingest_task(
     State(s): State<AppState>,
     Json(req): Json<IngestRequest>,
 ) -> impl IntoResponse {
-    let source = match req.source.as_deref() {
-        Some("claude-desktop") => TaskSource::ClaudeDesktop,
-        Some("claude-opus") => TaskSource::ClaudeOpus,
-        Some("cron") => TaskSource::Cron,
-        Some("webhook") => TaskSource::Webhook,
-        _ => TaskSource::Api,
-    };
-
-    let model = req.model.unwrap_or_else(|| {
-        // default: route frequent/cheap tasks to nemotron
-        "nemotron/taifoon".to_string()
-    });
+    let model = req.model.unwrap_or_else(|| "nemotron/taifoon".to_string());
 
     let envelope = TaskEnvelope::new(
         req.project,
-        source,
+        req.source,
         req.assigned_agent,
         req.skill,
         model,
@@ -146,32 +130,24 @@ async fn get_task(
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
 
+fn lake_response<T: Serialize>(result: anyhow::Result<T>) -> impl IntoResponse {
+    match result {
+        Ok(data) => Json(serde_json::to_value(data).unwrap()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 async fn analytics_global(State(s): State<AppState>) -> impl IntoResponse {
-    match s.lake.global_consumption() {
-        Ok(data) => Json(serde_json::to_value(data).unwrap()).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    lake_response(s.lake.global_consumption())
 }
-
 async fn analytics_projects(State(s): State<AppState>) -> impl IntoResponse {
-    match s.lake.per_project_consumption() {
-        Ok(data) => Json(serde_json::to_value(data).unwrap()).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    lake_response(s.lake.per_project_consumption())
 }
-
 async fn analytics_agents(State(s): State<AppState>) -> impl IntoResponse {
-    match s.lake.per_agent_consumption() {
-        Ok(data) => Json(serde_json::to_value(data).unwrap()).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    lake_response(s.lake.per_agent_consumption())
 }
-
 async fn analytics_daily(State(s): State<AppState>) -> impl IntoResponse {
-    match s.lake.daily_burn_last_30() {
-        Ok(data) => Json(serde_json::to_value(data).unwrap()).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    }
+    lake_response(s.lake.daily_burn_last_30())
 }
 
 // ── Nemotron proxy ─────────────────────────────────────────────────────────────
@@ -197,7 +173,6 @@ async fn nemotron_generate(
     Path(model): Path<String>,
     Json(body): Json<GenerateBody>,
 ) -> impl IntoResponse {
-    use mamba_nemotron::NemotronAdapter;
     let Some(adapter) = NemotronAdapter::from_model_str(&model) else {
         return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "unknown model" }))).into_response();
     };

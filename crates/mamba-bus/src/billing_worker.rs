@@ -27,7 +27,6 @@ impl BillingWorker {
         tokens_out: i64,
         cost_usd: f64,
     ) -> Result<BillingRecord> {
-        // 1. encrypt the full payload
         let full_json = serde_json::to_string(envelope)?;
         let encrypted_log = self.encryptor.encrypt(&full_json)?;
         let payload_hash = Encryptor::hash(&full_json);
@@ -40,11 +39,10 @@ impl BillingWorker {
             tokens_in,
             tokens_out,
             cost_usd,
-            payload_hash: payload_hash.clone(),
+            payload_hash,
             encrypted_log: encrypted_log.clone(),
         };
 
-        // 2. anchor on-chain
         let chain_tx = self.anchor.anchor(&event).await?;
         info!(
             task_id = %envelope.id,

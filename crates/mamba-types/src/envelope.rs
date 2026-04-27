@@ -78,12 +78,37 @@ pub enum TaskStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+impl TaskStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Dispatched => "dispatched",
+            Self::Running => "running",
+            Self::Done => "done",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl TaskSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ClaudeDesktop => "claude_desktop",
+            Self::ClaudeOpus => "claude_opus",
+            Self::Cron => "cron",
+            Self::Api => "api",
+            Self::Webhook => "webhook",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskSource {
     ClaudeDesktop,
     ClaudeOpus,
     Cron,
+    #[default]
     Api,
     Webhook,
 }

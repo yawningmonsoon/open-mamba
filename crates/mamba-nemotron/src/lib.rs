@@ -103,18 +103,23 @@ impl NemotronClient {
         Ok(resp.json().await?)
     }
 
-    /// Check that all three adapters are healthy.
     pub async fn health_all(&self) -> Vec<(NemotronAdapter, bool)> {
-        let adapters = [NemotronAdapter::Taifoon, NemotronAdapter::Polymarket, NemotronAdapter::Algotrada];
-        let mut results = Vec::new();
-        for adapter in adapters {
+        let check = |adapter: NemotronAdapter| {
             let url = format!("{}/{}/health", self.base_url, adapter.slug());
-            let ok = self.http.get(&url).send().await
-                .map(|r| r.status().is_success())
-                .unwrap_or(false);
-            results.push((adapter, ok));
-        }
-        results
+            let http = self.http.clone();
+            async move {
+                let ok = http.get(&url).send().await
+                    .map(|r| r.status().is_success())
+                    .unwrap_or(false);
+                (adapter, ok)
+            }
+        };
+        let (t, p, a) = tokio::join!(
+            check(NemotronAdapter::Taifoon),
+            check(NemotronAdapter::Polymarket),
+            check(NemotronAdapter::Algotrada),
+        );
+        vec![t, p, a]
     }
 }
 

@@ -46,23 +46,26 @@ pub struct CronJobCreated {
 pub struct OpenfangClient {
     base_url: String,
     http: reqwest::Client,
+    telegram_chat: Option<String>,
 }
 
 impl OpenfangClient {
-    pub fn new(base_url: impl Into<String>) -> Self {
+    pub fn new(base_url: impl Into<String>, telegram_chat: Option<String>) -> Self {
         Self {
             base_url: base_url.into(),
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .unwrap(),
+            telegram_chat,
         }
     }
 
     pub fn from_env() -> Self {
         let url = std::env::var("OPENFANG_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:4200".to_string());
-        Self::new(url)
+        let chat = std::env::var("MAMBA_TELEGRAM_CHAT").ok();
+        Self::new(url, chat)
     }
 
     /// Look up the openfang agent UUID by slug name.
@@ -84,17 +87,15 @@ impl OpenfangClient {
         bail!("openfang agent '{}' not found", slug)
     }
 
-    /// Dispatch a TaskEnvelope as a one-shot CronJob (fires immediately via At = now).
     pub async fn dispatch(&self, envelope: &TaskEnvelope, agent_uuid: &str) -> Result<Uuid> {
-        let delivery = match (&envelope.assigned_agent, std::env::var("MAMBA_TELEGRAM_CHAT").ok()) {
-            (_, Some(chat_id)) => CronDelivery::Channel {
+        let delivery = match &self.telegram_chat {
+            Some(chat_id) => CronDelivery::Channel {
                 channel: "telegram".to_string(),
-                to: chat_id,
+                to: chat_id.clone(),
             },
-            _ => CronDelivery::None,
+            None => CronDelivery::None,
         };
 
-        // Build message: skill prefix + payload
         let message = match &envelope.skill {
             Some(skill) => format!("/skill {skill}\n\n{}", envelope.payload),
             None => envelope.payload.clone(),
