@@ -22,8 +22,12 @@ CREATE TABLE IF NOT EXISTS task_envelopes (
     completed_at    TIMESTAMPTZ,
     response        TEXT
 );
--- Idempotent column add for existing DBs.
-ALTER TABLE task_envelopes ADD COLUMN IF NOT EXISTS response TEXT;
+-- Idempotent column adds for existing DBs.
+ALTER TABLE task_envelopes ADD COLUMN IF NOT EXISTS response    TEXT;
+ALTER TABLE task_envelopes ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0;
+-- `not_before` defers the next pickup time. NULL = pickup whenever; set to
+-- `now() + backoff` after a transient dispatch failure.
+ALTER TABLE task_envelopes ADD COLUMN IF NOT EXISTS not_before  TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_te_status     ON task_envelopes(status);
 CREATE INDEX IF NOT EXISTS idx_te_project    ON task_envelopes(project);
 CREATE INDEX IF NOT EXISTS idx_te_agent      ON task_envelopes(assigned_agent);

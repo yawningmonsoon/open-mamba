@@ -134,11 +134,90 @@ impl Bus {
                 Ok(())
             }
             Err(e) => {
-                error!(id = %envelope.id, "openfang dispatch error: {e}");
-                self.lake.update_status(envelope.id, TaskStatus::Failed, None)?;
+                let msg = e.to_string();
+                let is_transient = is_transient_error(&msg);
+                let rescheduled = self
+                    .lake
+                    .record_dispatch_failure(
+                        envelope.id,
+                        is_transient,
+                        /* max_retries */ 2,
+                        /* backoff_secs */ if is_transient { 30 } else { 0 },
+                    )
+                    .unwrap_or(false);
+                if rescheduled {
+                    info!(
+                        id = %envelope.id,
+                        "openfang dispatch transient failure, rescheduled (will retry in 30s): {msg}"
+                    );
+                } else {
+                    error!(id = %envelope.id, "openfang dispatch failed permanently: {msg}");
+                }
                 Err(e)
             }
         }
+    }
+}
+
+/// Classify a dispatch error message as transient (retryable) vs permanent.
+///
+/// Transient: network blips, request timeouts, openfang briefly unreachable,
+/// Anthropic / nemotron 5xx. These should retry with backoff.
+///
+/// Permanent: `agent not found`, 4xx from openfang/nemotron, parse errors,
+/// malformed envelope. Retrying these wastes tokens and time.
+fn is_transient_error(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    let transient_signals = [
+        "timeout",
+        "timed out",
+        "error sending request",
+        "connection refused",
+        "connection reset",
+        "broken pipe",
+        "502 bad gateway",
+        "503 service unavailable",
+        "504 gateway timeout",
+        "tcp connect error",
+        "deadline has elapsed",
+    ];
+    let permanent_signals = [
+        "agent ",         // 'openfang agent X not found'
+        "missing field",
+        "unauthorized",
+        "401 ",
+        "403 ",
+        "invalid api key",
+        "license rejected",
+    ];
+    if permanent_signals.iter().any(|s| m.contains(s)) {
+        return false;
+    }
+    transient_signals.iter().any(|s| m.contains(s))
+}
+
+#[cfg(test)]
+mod transient_tests {
+    use super::is_transient_error;
+
+    #[test]
+    fn timeout_is_transient() {
+        assert!(is_transient_error("error sending request for url (http://...)"));
+        assert!(is_transient_error("operation timed out after 60s"));
+        assert!(is_transient_error("nemotron returned 502 Bad Gateway"));
+    }
+
+    #[test]
+    fn auth_is_permanent() {
+        assert!(!is_transient_error("openfang agent 'coder' not found"));
+        assert!(!is_transient_error("401 unauthorized"));
+        assert!(!is_transient_error("invalid api key"));
+    }
+
+    #[test]
+    fn unknown_defaults_to_permanent() {
+        // Conservative: unknown errors don't waste a retry budget.
+        assert!(!is_transient_error("some weird never-before-seen error"));
     }
 }
 

@@ -48,10 +48,16 @@ impl OpenfangClient {
         Self {
             base_url: base_url.into(),
             http: reqwest::Client::builder()
-                // Agent turns can take 60-300s for complex tasks (file I/O,
-                // multi-step tool use). Generous timeout, since the dispatch
-                // is async-spawned anyway.
-                .timeout(std::time::Duration::from_secs(600))
+                // Agent turns for complex coding tasks (cargo build + multi-file
+                // edits + test run) routinely take 5-30 minutes. The dispatch
+                // is async-spawned, so the only cost of a long timeout is that
+                // a stuck task takes longer to surface as a failure. 60 min is
+                // chosen to cover the longest realistic single-step workflow
+                // brief (full crate scaffold + impl + tests).
+                .timeout(std::time::Duration::from_secs(3600))
+                // Defensive: always honor read deadlines even if the server
+                // forgets to close the connection.
+                .read_timeout(std::time::Duration::from_secs(3600))
                 .build()
                 .expect("build reqwest client"),
         }

@@ -321,10 +321,59 @@ impl Lake {
         Ok(n)
     }
 
+    /// Decide whether a dispatch failure should be retried.
+    ///
+    /// If `is_transient` and `retry_count < max_retries`, set the row back
+    /// to `pending`, bump `retry_count`, set `not_before = now() + backoff_secs`.
+    /// Returns `true` if the row was rescheduled, `false` if permanently failed.
+    pub fn record_dispatch_failure(
+        &self,
+        id: Uuid,
+        is_transient: bool,
+        max_retries: i32,
+        backoff_secs: i64,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+
+        let current_retry: i32 = conn
+            .query_row(
+                "SELECT retry_count FROM task_envelopes WHERE id=?",
+                duckdb::params![id.to_string()],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+
+        if is_transient && current_retry < max_retries {
+            // DuckDB's `now() + INTERVAL N SECOND` would also work, but
+            // computing in Rust keeps the SQL portable.
+            let next_pickup = chrono::Utc::now() + chrono::Duration::seconds(backoff_secs);
+            conn.execute(
+                "UPDATE task_envelopes
+                 SET status='pending',
+                     retry_count=retry_count + 1,
+                     not_before=?,
+                     dispatched_at=NULL
+                 WHERE id=?",
+                duckdb::params![next_pickup.to_rfc3339(), id.to_string()],
+            )?;
+            Ok(true)
+        } else {
+            conn.execute(
+                "UPDATE task_envelopes SET status='failed' WHERE id=?",
+                duckdb::params![id.to_string()],
+            )?;
+            Ok(false)
+        }
+    }
+
     pub fn list_pending(&self) -> Result<Vec<Uuid>> {
         let conn = self.conn.lock().unwrap();
+        // Honor `not_before` so backed-off retries don't fire instantly.
         let mut stmt = conn.prepare(
-            "SELECT id FROM task_envelopes WHERE status='pending' ORDER BY priority ASC, created_at ASC"
+            "SELECT id FROM task_envelopes
+             WHERE status='pending'
+               AND (not_before IS NULL OR not_before <= now())
+             ORDER BY priority ASC, created_at ASC"
         )?;
         let ids = stmt
             .query_map([], |row| row.get::<_, String>(0))?
