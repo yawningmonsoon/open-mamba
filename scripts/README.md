@@ -12,7 +12,7 @@ Single command (`mamba up`) brings up the autonomous task delivery pipeline:
                           │                            │
                           ▼                            │
                     nemotron/* ────────────────────────┘
-                    (scanner.taifoon.dev)
+                    (NEMOTRON_BASE_URL)
 ```
 
 ## Quick start

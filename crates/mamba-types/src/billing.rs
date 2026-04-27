@@ -15,7 +15,7 @@ pub struct BillingRecord {
     pub cost_usd: f64,
     /// AES-GCM encrypted JSON of the full envelope payload
     pub encrypted_log: String,
-    /// on-chain tx hash (rpc.taifoon.dev)
+    /// on-chain tx hash (chain configured via MAMBA_CHAIN_RPC)
     pub chain_tx: Option<String>,
     pub chain_block: Option<u64>,
     pub created_at: DateTime<Utc>,

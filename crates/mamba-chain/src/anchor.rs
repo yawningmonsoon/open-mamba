@@ -1,10 +1,11 @@
-//! On-chain billing anchor via rpc.taifoon.dev
+//! On-chain billing anchor.
 //!
 //! Submits a minimal ETH transaction whose input data encodes:
 //!   keccak256("MambaAudit") ++ task_id (16 bytes) ++ payload_hash (32 bytes)
 //!
 //! The tx costs ~21_000 gas + calldata. No contract needed — the data is
-//! permanently visible in the block explorer at taifoon.dev/tx/<hash>.
+//! permanently visible in the block explorer for whichever chain you've
+//! pointed `MAMBA_CHAIN_RPC` at.
 
 use anyhow::Result;
 use mamba_types::billing::BillingEvent;
@@ -23,9 +24,10 @@ impl ChainAnchor {
         }
     }
 
+    /// Reads `MAMBA_CHAIN_RPC` + `MAMBA_CHAIN_KEY` from env. With either
+    /// unset, on-chain billing is disabled (anchor calls become no-ops).
     pub fn from_env() -> Self {
-        let rpc = std::env::var("MAMBA_CHAIN_RPC")
-            .unwrap_or_else(|_| "https://rpc.taifoon.dev".to_string());
+        let rpc = std::env::var("MAMBA_CHAIN_RPC").unwrap_or_default();
         Self::new(rpc)
     }
 

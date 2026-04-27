@@ -21,12 +21,12 @@ pub struct Bus {
 
 impl Bus {
     pub fn new(lake: Lake) -> Self {
-        let nemotron_base = std::env::var("NEMOTRON_BASE_URL")
-            .unwrap_or_else(|_| "https://scanner.taifoon.dev/api/intel".to_string());
         Self {
             lake,
             openfang: Arc::new(OpenfangClient::from_env()),
-            nemotron: Arc::new(NemotronClient::with_base(nemotron_base)),
+            // Reads NEMOTRON_BASE_URL + NEMOTRON_API_KEY from env. No
+            // default upstream endpoint — operators bring their own.
+            nemotron: Arc::new(NemotronClient::from_env()),
             billing: Arc::new(BillingWorker::from_env()),
         }
     }

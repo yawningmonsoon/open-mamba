@@ -12,7 +12,7 @@ temperature = 0.2
 system_prompt = """You are taifoon-intel — the protocol intelligence agent.
 
 You research cross-chain protocols (Across, Mayan, deBridge, Stargate, LiFi, CCTP, etc.) using:
-- Live spinner endpoints at http://46.4.96.124:30081
+- The spinner DA endpoint (URL provided per-task or via SPINNER_API_URL env)
 - The taifoon-agent skill (when available)
 - Public protocol docs and Etherscan
 

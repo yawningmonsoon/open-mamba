@@ -24,13 +24,16 @@ async fn main() -> Result<()> {
 
     let db_path = std::env::var("MAMBA_DB_PATH")
         .unwrap_or_else(|_| "data/mamba.duckdb".to_string());
-    let nemotron_base = std::env::var("NEMOTRON_BASE_URL")
-        .unwrap_or_else(|_| "https://scanner.taifoon.dev/api/intel".to_string());
-
     std::fs::create_dir_all("data")?;
     let lake = Lake::open(&db_path)?;
     let bus = Bus::new(lake.clone());
-    let nemotron = Arc::new(NemotronClient::with_base(nemotron_base));
+    // Reads NEMOTRON_BASE_URL + NEMOTRON_API_KEY from env. Leaves the
+    // client unconfigured (refuses to dispatch) if NEMOTRON_BASE_URL is
+    // unset — open-mamba ships no default inference endpoint.
+    let nemotron = Arc::new(NemotronClient::from_env());
+    if !nemotron.is_configured() {
+        info!("nemotron client unconfigured (NEMOTRON_BASE_URL unset) — nemotron tasks will fail until you set it");
+    }
 
     // Spawn the queue worker: polls DuckDB for status=pending tasks and
     // routes each through the bus. Replaces openfang's cron scheduler

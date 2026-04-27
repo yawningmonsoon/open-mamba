@@ -5,8 +5,8 @@
 You drop work into a queue (DuckDB). A background worker picks each task up
 and dispatches it to the right agent runtime — Claude (via the local
 [`claude`](https://github.com/anthropics/claude-code) CLI through openfang),
-or nemotron at scanner.taifoon.dev. No API keys to juggle, no cron loops to
-debug, no copy-paste between terminals.
+or whichever inference provider you've configured for nemotron tasks.
+No API keys to juggle, no cron loops to debug, no copy-paste between terminals.
 
 ```
                         ┌──────────────────┐
@@ -19,11 +19,11 @@ debug, no copy-paste between terminals.
                                  │
                 ┌────────────────┴────────────────┐
                 ▼                                 ▼
-        ┌────────────┐                    ┌────────────┐
-        │  openfang  │ ──► claude -p ─►   │  nemotron  │ ──► scanner.taifoon.dev
-        │  :4200     │     (local CLI,    │  (HTTP)    │     (taifoon/polymarket
-        │            │      your auth)    │            │      /algotrada adapters)
-        └────────────┘                    └────────────┘
+        ┌────────────┐                    ┌────────────────┐
+        │  openfang  │ ──► claude -p ─►   │  nemotron      │ ──► your inference provider
+        │  :4200     │     (local CLI,    │  HTTP client   │     (vLLM / TGI / Ollama
+        │            │      your auth)    │  bearer/grid   │      / managed grid endpoint)
+        └────────────┘                    └────────────────┘
 ```
 
 ---
@@ -119,6 +119,56 @@ If you'd rather use a real API key (skips Claude Code entirely):
 
 ---
 
+## Inference providers (nemotron tasks)
+
+open-mamba ships **no default inference endpoint**. To dispatch
+`nemotron/<adapter>` tasks, set `NEMOTRON_BASE_URL` in `.env` to a server
+that exposes:
+
+- `POST <base>/<adapter>/generate` — JSON body `{prompt, system?,
+  max_tokens?, temperature?}`, response `{response, tokens, duration,
+  tokens_per_second, model?}`
+- `GET  <base>/<adapter>/health`
+
+Adapter slugs are forwarded verbatim, so any provider that handles
+arbitrary path segments works (vLLM with multi-LoRA routing, TGI with
+adapters, Ollama with model aliases, etc.).
+
+### Three ways to plug in
+
+| Mode | Set | Auth header sent |
+|---|---|---|
+| **Self-host** (vLLM, TGI, Ollama) | `NEMOTRON_BASE_URL`, optionally `NEMOTRON_API_KEY` | `Authorization: Bearer <key>` |
+| **Generic OpenAI-compatible** | `NEMOTRON_BASE_URL`, `NEMOTRON_API_KEY` | `Authorization: Bearer <key>` |
+| **Taifoon-grid** (managed) | `NEMOTRON_BASE_URL`, `TAIFOON_GRID_KEY=taif-…` | `x-taifoon-key: <key>` |
+
+### Taifoon-grid (paid managed access)
+
+The taifoon-grid is a metered inference service with on-chain billing —
+register a wallet, top up USDC, get a deterministic API key derived from
+your wallet + chainId. Each call deducts grid credits per the published
+weights (see the grid's own pricing docs). The grid contract is the
+source of truth for balance and key validity; open-mamba only forwards
+the `x-taifoon-key` header.
+
+This is the same payment rail as the rest of the taifoon ecosystem
+(price oracle, signal subscriptions, V5 proof bundles) — one wallet,
+one key, one balance, all consumption metered uniformly.
+
+To get a key: register your wallet at the grid endpoint's
+`/api/grid/register`, fund it, then export:
+
+```bash
+echo "TAIFOON_GRID_KEY=taif-…" >> ~/.mamba/runtime.env
+echo "NEMOTRON_BASE_URL=<your-grid-endpoint>" >> ~/.mamba/runtime.env
+```
+
+(Both keys are forwarded if both are set — useful when an upstream
+proxy needs Bearer auth and the grid contract validates the
+`x-taifoon-key` separately.)
+
+---
+
 ## GitHub identity for agents
 
 Tasks that do git work (commits, PRs, pushes) inherit the machine's
@@ -161,7 +211,7 @@ mamba whoami      # active gh login + configured git committer in $PWD
 
 ### `mamba-bus` — the dispatcher
 - `Bus.route` decides nemotron vs openfang based on `model` field
-- Models matching `nemotron/*` → direct HTTP to scanner.taifoon.dev
+- Models matching `nemotron/*` → direct HTTP to your `NEMOTRON_BASE_URL`
 - Everything else → openfang (which then routes to claude-code)
 - Token usage and cost are written back to DuckDB on completion
 
